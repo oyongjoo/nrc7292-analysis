@@ -68,14 +68,16 @@
 
 ## Build Commands Reference
 ```bash
-# Kernel Driver
-cd package/src/nrc && make clean && make
+# Kernel Driver (Code style check in WSL2)
+cd package/src/nrc && make clean
+perl ./checkpatch.pl --file --terse --ignore=LINUX_VERSION_CODE --no-tree *.c *.h
 
 # CLI Application  
 cd package/src/cli_app && make clean && make
 
 # Testing
 cd package/src/nrc/test/block_ack && python testsuit.py
+cd package/src/nrc/test/netlink && python3 -c "from nrcnetlink import NrcNetlink; print('OK')"
 ```
 
 ## Important Notes
@@ -89,7 +91,9 @@ cd package/src/nrc/test/block_ack && python testsuit.py
 - All documentation verified to be based on actual source code implementations
 - User emphasized importance of source code accuracy for future reference and understanding
 - Created comprehensive analysis covering architecture, protocols, networking, regulatory, and testing
-- Ready for advanced topics or specific implementation guidance
+- Set up build environment in WSL2: make, build-essential, checkpatch.pl for code style validation
+- Successfully built CLI application and verified test framework functionality
+- Ready for advanced topics, implementation guidance, or practical development work
 
 ---
 *Last Updated: 2025-06-15*
