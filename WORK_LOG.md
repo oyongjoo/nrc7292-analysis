@@ -86,6 +86,14 @@ cd package/src/nrc/test/netlink && python3 -c "from nrcnetlink import NrcNetlink
 - Maintain detailed documentation for future reference
 - Prefer editing existing files over creating new ones
 
+## Documentation Guidelines
+- **Bilingual Documentation**: Create both English and Korean versions for all documents
+  - English version: `filename.md` (original format)
+  - Korean version: `filename_ko.md` (Korean translation)
+- **Default Language**: Show Korean version (`_ko.md`) to user by default
+- **Auto-generation**: Automatically create both versions when generating new documentation
+- **Existing Documents**: Update all existing documentation to follow this bilingual approach
+
 ## Session Context
 - Completed comprehensive analysis of NRC7292 HaLow driver with 7 major documentation areas
 - All documentation verified to be based on actual source code implementations
