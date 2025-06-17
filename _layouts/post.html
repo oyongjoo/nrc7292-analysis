@@ -1,0 +1,36 @@
+---
+layout: default
+---
+<article>
+    <header>
+        <h1>{{ page.title }}</h1>
+        <time datetime="{{ page.date | date_to_xmlschema }}">
+            {{ page.date | date: "%B %d, %Y" }}
+        </time>
+        {% if page.tags %}
+        <div class="tags">
+            {% for tag in page.tags %}
+                <span class="tag">{{ tag }}</span>
+            {% endfor %}
+        </div>
+        {% endif %}
+        {% if page.category %}
+        <div class="category">
+            Category: <span class="category-name">{{ page.category }}</span>
+        </div>
+        {% endif %}
+    </header>
+    <div class="content">
+        {{ content }}
+    </div>
+    <footer>
+        <div class="post-navigation">
+            {% if page.previous %}
+                <a href="{{ page.previous.url | relative_url }}" class="prev">← {{ page.previous.title }}</a>
+            {% endif %}
+            {% if page.next %}
+                <a href="{{ page.next.url | relative_url }}" class="next">{{ page.next.title }} →</a>
+            {% endif %}
+        </div>
+    </footer>
+</article>

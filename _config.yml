@@ -1,6 +1,6 @@
 title: "NRC7292 Analysis Blog"
 description: "Code analysis and research documentation for NRC7292 HaLow driver"
-baseurl: "/nrc7292-analysis"
+baseurl: ""
 url: "https://oyongjoo.github.io"
 
 markdown: kramdown

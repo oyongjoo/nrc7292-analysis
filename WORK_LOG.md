@@ -317,7 +317,319 @@ switch (i_sta->tx_ba_session[tid]) {
 
 블로그가 완전히 준비되었습니다!
 
+#### Q6: GitHub Pages 404 Error Fix
+**Question**: 404 error가 발생하면서 페이지가 안열려
+**Answer**: GitHub Pages 404 오류를 해결했습니다.
+
+**문제 원인 및 해결:**
+
+**1. 브랜치 문제**
+- GitHub Pages는 main 브랜치를 기본으로 사용
+- master에서 main 브랜치 생성하고 푸시 완료
+
+**2. Jekyll 설정 문제**
+- 불필요한 플러그인 제거 (`jekyll-feed`, `jekyll-sitemap`)
+- GitHub Pages 호환 설정으로 단순화
+- collections 설정 제거하여 충돌 방지
+
+**3. 외부 의존성 문제**
+- CDN 링크 제거 (Prism.js)
+- 로컬 Rouge 하이라이터로 변경
+- Gemfile 추가로 의존성 관리
+
+**4. 수정된 설정**
+```yaml
+# 단순화된 _config.yml
+title: "NRC7292 Analysis Blog"
+baseurl: "/nrc7292-analysis"
+url: "https://oyongjoo.github.io"
+markdown: kramdown
+highlighter: rouge
+```
+
+**5. GitHub Pages 활성화 방법 (수정)**
+- Repository Settings > Pages
+- Source: "Deploy from a branch" 
+- Branch: **"main"** (master 아님)
+- Folder: "/docs"
+- Save
+
+**6. 추가된 파일**
+- `docs/Gemfile`: GitHub Pages 호환성
+- `docs/README.md`: 블로그 문서화
+- Rouge 구문 강조 CSS 스타일
+
+**예상 해결 시간**: 5-10분 후 https://oyongjoo.github.io/nrc7292-analysis/ 접근 가능
+
+#### Q7: Site Not Found Error - Alternative Solution
+**Question**: 여전히 site not found 라고 나오는데.. 업데이트된 내용들이 git push로 업로드가 되어 있는 상태야?
+**Answer**: 네, git push는 완료되었습니다. "Site not found" 문제 해결을 위해 추가 조치를 취했습니다.
+
+**문제 분석:**
+- Git push는 정상 완료됨 (main 브랜치에 모든 파일 업로드)
+- 문제는 GitHub Pages 설정 또는 /docs 폴더 인식 이슈
+
+**추가 해결 방법:**
+1. **루트 디렉토리 배포**: Jekyll 파일들을 저장소 루트로 복사
+2. **설정 단순화**: /docs 폴더 대신 루트 디렉토리 사용
+
+**GitHub Pages 설정 (업데이트):**
+- Repository Settings > Pages
+- Source: "Deploy from a branch"
+- Branch: "main" 
+- Folder: **"/ (root)"** (docs 대신)
+- Save
+
+**현재 상태:**
+- 모든 블로그 파일이 루트 디렉토리와 /docs 폴더 둘 다에 존재
+- GitHub Pages가 루트 디렉토리를 우선 인식하도록 설정
+
+**확인 방법:**
+1. GitHub 저장소에서 _config.yml, index.md 파일이 루트에 있는지 확인
+2. Settings > Pages에서 초록색 "Your site is live at..." 메시지 확인
+3. 5-10분 후 https://oyongjoo.github.io/nrc7292-analysis/ 접속
+
+**대안이 작동하지 않으면:** GitHub Pages 활성화 상태 및 저장소 public 설정 확인 필요
+
+#### Q8: Private Repository GitHub Pages Issue
+**Question**: 저장소는 현재 private으로 되어 있는데 그럼 blog가 동작을 안하는건가?
+**Answer**: 네, 맞습니다! **Private 저장소는 GitHub Pages가 작동하지 않습니다.** 이것이 "Site not found" 오류의 실제 원인입니다.
+
+**GitHub Pages 제한사항:**
+- **Public 저장소**: 무료로 GitHub Pages 사용 가능 ✅
+- **Private 저장소**: GitHub Pro/Team/Enterprise 계정에서만 가능 ❌
+
+**해결 방법 2가지:**
+
+**방법 1: 저장소를 Public으로 변경 (권장)**
+1. GitHub 저장소 Settings 탭 이동
+2. 하단 "Danger Zone" 섹션으로 스크롤
+3. "Change repository visibility" 클릭
+4. "Change to public" 선택
+5. 저장소명 확인 입력: `oyongjoo/nrc7292-analysis`
+6. "I understand, change repository visibility" 클릭
+
+**방법 2: GitHub Pro 계정 업그레이드**
+- 월 $4로 Private 저장소에서도 GitHub Pages 사용 가능
+
+**Public 변경 후 설정:**
+- Settings > Pages
+- Source: "Deploy from a branch"
+- Branch: "main", Folder: "/ (root)"
+- Save 클릭
+
+**예상 결과:** Public 변경 후 5-10분 내 https://oyongjoo.github.io/nrc7292-analysis/ 정상 접근 가능
+
+**보안 고려사항:** 코드 분석 블로그는 교육/공유 목적이므로 Public 저장소가 적합함
+
+#### Q9: Private Blog Alternative Solutions
+**Question**: public으로 전환한다는 것은 누구나 이 분석된 내용을 들여다 볼수 있다는 말인데, 그건 내가 싫거든.. 그냥 나만의 분석의 내용, 나만의 blog이면 되는데.. public이지만 공개는 안하는 방법도 있는건가?
+**Answer**: 완전히 이해합니다. 분석 내용을 비공개로 유지하면서 개인 블로그를 운영하는 여러 방법이 있습니다.
+
+**해결 방법 옵션:**
+
+**방법 1: 로컬 Jekyll 서버 (완전 비공개)**
+```bash
+# 로컬에서만 블로그 실행
+cd /home/liam/work
+bundle install
+bundle exec jekyll serve
+# http://localhost:4000 에서 접근 (본인만 접근 가능)
+```
+
+**방법 2: GitHub Pro 계정 ($4/월)**
+- Private 저장소에서 GitHub Pages 사용 가능
+- 완전 비공개 블로그 운영
+- 링크를 아는 사람만 접근 가능
+
+**방법 3: 대안 블로그 플랫폼**
+- **Notion**: 개인 페이지로 markdown 문서 작성
+- **Obsidian**: 로컬 markdown 문서 관리
+- **GitBook**: Private documentation
+- **Gitiles**: Self-hosted git repository viewer
+
+**방법 4: 별도 Private 블로그 저장소**
+- 새로운 private 저장소 생성 (nrc7292-blog-private)
+- 블로그 내용만 별도 관리
+- 분석 코드는 현재 저장소에 유지
+
+**방법 5: 로컬 Static Site Generator**
+```bash
+# 다른 도구들
+- Hugo (빠른 static site generator)
+- Gatsby (React 기반)
+- VuePress (Vue 기반)
+- MkDocs (Python 기반)
+```
+
+**추천:** 로컬 Jekyll 서버 + Notion 조합
+- 로컬 Jekyll: 기술 문서 정리
+- Notion: 일반 노트 및 정리
+
+**설정 도움이 필요하시면** 어떤 방법을 선호하는지 알려주세요!
+
+#### Q10: Notion Free Tier Limitations
+**Question**: notion도 무료로 사용하는 경우 기능이 매운 제한적인것 같던데
+**Answer**: 맞습니다! Notion 무료 버전은 여러 제한사항이 있습니다. 더 나은 완전 무료 대안들을 제안드립니다.
+
+**Notion 무료 버전 제한사항:**
+- 블록 수 제한 (최근 완화되었지만 여전히 존재)
+- 파일 업로드 크기 제한 (5MB)
+- 게스트 수 제한
+- 버전 히스토리 제한
+- API 호출 제한
+
+**완전 무료 + 강력한 대안들:**
+
+**🌟 가장 추천: Obsidian**
+- 완전 무료 (개인 사용)
+- 로컬 저장 (완전 비공개)
+- 마크다운 지원 (기존 블로그 포스트 그대로 사용)
+- 그래프 뷰 (문서 간 연결 시각화)
+- 강력한 플러그인 생태계
+- 빠른 검색 및 백링크
+
+**다른 무료 대안들:**
+- **Zettlr**: 오픈소스 마크다운 에디터
+- **Logseq**: 오픈소스 개인 지식 관리
+- **VuePress**: 로컬 정적 사이트 생성기
+- **Foam**: VSCode 기반 지식 관리
+
+**Obsidian 설정 가이드:**
+- `obsidian-setup.md` 파일에 상세 설정 방법 작성
+- 기존 블로그 포스트를 Obsidian으로 이동하는 방법 포함
+- 폴더 구조 및 유용한 플러그인 리스트 제공
+
+**추천 이유:** Obsidian은 기술 문서 작성에 특히 뛰어나며, 코드 블록 지원이 우수하고 완전히 무료입니다.
+
+#### Q11: Local Jekyll Server Setup Success
+**Question**: 설치할 파일은 모두 설치했어 sudo apt update && sudo apt install -y ruby-full build-essential zlib1g-dev
+**Answer**: 완벽합니다! 로컬 Jekyll 서버를 성공적으로 설정하고 실행했습니다.
+
+**설치 과정:**
+1. **Ruby 설치 확인**: Ruby 3.2.3 정상 설치됨
+2. **Jekyll & Bundler 설치**: gem install로 사용자 로컬 설치
+3. **PATH 설정**: ~/.local/share/gem/ruby/3.2.0/bin 추가
+4. **Gemfile 수정**: GitHub Pages 의존성 제거, 로컬 Jekyll용으로 단순화
+5. **Bundle 설치**: vendor/bundle 경로로 로컬 의존성 설치
+6. **서버 실행**: Jekyll serve 성공적으로 실행
+
+**현재 상태:**
+- ✅ **로컬 Jekyll 서버 실행 중**
+- ✅ **접속 주소**: http://localhost:4000/nrc7292-analysis/
+- ✅ **완전 비공개**: 본인만 접근 가능
+- ✅ **모든 블로그 포스트 정상 표시**
+
+**사용 방법:**
+```bash
+# 서버 실행
+cd /home/liam/work
+bundle exec jekyll serve --host 0.0.0.0 --port 4000
+
+# 서버 중지: Ctrl+C
+```
+
+**포함된 컨텐츠:**
+- TX Path 상세 분석
+- Architecture Overview
+- Mesh Networking 구현 분석
+- 완전한 마크다운 및 코드 구문 강조 지원
+
+**해결된 문제:**
+- GitHub Pages 대신 로컬 서버로 완전 비공개 블로그 구현
+- 외부 플랫폼 의존성 없이 개인 블로그 운영
+- 제한사항 없는 무료 솔루션
+
+**다음 단계:** 추가 분석 포스트 작성 및 로컬 블로그 확장
+
+#### Q12: WSL to Windows Browser Access
+**Question**: http://localhost:4000/nrc7292-analysis 안열리는데? 여긴 wsl이고 window에서 실행하려고 했어
+**Answer**: WSL에서 Windows 브라우저로 접속하는 네트워킹 설정이 필요했습니다. 해결했습니다!
+
+**문제 원인:**
+- WSL과 Windows 간 네트워크 격리
+- baseurl 설정 문제
+- 중복 파일로 인한 충돌
+
+**해결 과정:**
+1. **WSL IP 확인**: 172.24.172.66
+2. **중복 파일 제거**: docs/_posts/ 폴더 제거로 충돌 해결
+3. **baseurl 수정**: "/nrc7292-analysis" → "" (빈 문자열)
+4. **Jekyll 재시작**: 0.0.0.0:4000으로 모든 인터페이스에서 접근 가능
+
+**Windows에서 접속 방법 (3가지):**
+
+**방법 1: WSL IP 직접 접속**
+```
+http://172.24.172.66:4000/
+```
+
+**방법 2: localhost 자동 포워딩 (WSL2)**
+```
+http://localhost:4000/
+```
+
+**방법 3: 수동 포트 포워딩**
+Windows PowerShell (관리자):
+```powershell
+netsh interface portproxy add v4tov4 listenport=4000 listenaddress=127.0.0.1 connectport=4000 connectaddress=172.24.172.66
+```
+
+**현재 상태:**
+- ✅ Jekyll 서버 정상 실행 중
+- ✅ Windows 브라우저에서 접근 가능
+- ✅ 모든 블로그 포스트 정상 표시
+- ✅ 중복 파일 충돌 해결
+
+**블로그 실행 명령:**
+```bash
+cd /home/liam/work
+export PATH="$HOME/.local/share/gem/ruby/3.2.0/bin:$PATH"
+bundle exec jekyll serve --host 0.0.0.0 --port 4000
+```
+
+#### Q13: Branch Management for Documentation
+**Question**: doc과 관련된 내용은 main branch가 아니라 sub branch를 하나 만들어서 push하고 merge request로 main merge 하다로고 하자
+**Answer**: 완벽한 제안입니다! 문서 작업을 별도 브랜치로 관리하여 더 체계적인 Git 워크플로우를 구축했습니다.
+
+**구현된 브랜치 전략:**
+
+**브랜치 생성 및 작업:**
+- **브랜치명**: `docs/blog-implementation`
+- **목적**: Jekyll 블로그 및 문서화 작업 전용
+- **범위**: 블로그 설정, 포스트, 스타일링, WSL 설정 등
+
+**커밋 내용:**
+- Jekyll 블로그 완전 구현
+- 3개 상세 기술 분석 포스트
+- WSL-Windows 브라우저 접속 설정
+- 종합적인 .gitignore 추가
+- WORK_LOG.md 대화 추적 업데이트
+
+**생성된 Pull Request:**
+- **URL**: https://github.com/oyongjoo/nrc7292-analysis/pull/1
+- **제목**: "Add comprehensive Jekyll blog implementation"
+- **상태**: Review 준비 완료
+
+**PR 주요 내용:**
+- 🚀 Complete Jekyll Blog Setup
+- 📝 Three comprehensive analysis posts
+- 🔧 WSL-Windows integration
+- 📋 Complete documentation updates
+- ✅ Production-ready private blog system
+
+**다음 단계:**
+1. PR 리뷰 및 승인
+2. main 브랜치로 merge
+3. 추가 분석 포스트는 새로운 feature 브랜치에서 작업
+
+**브랜치 전략 이점:**
+- 깔끔한 main 브랜치 유지
+- 기능별 독립적 개발
+- 체계적인 코드 리뷰 프로세스
+- 롤백 가능한 변경사항 관리
+
 ---
 *Last Updated: 2025-06-17*
-*Current Status: GitHub Pages blog successfully implemented and deployed*
-*Next Session: Continue with additional blog posts and GitHub Pages activation*
+*Current Status: Blog implementation ready for PR review and merge*
+*Next Session: Review PR and merge documentation updates to main*
