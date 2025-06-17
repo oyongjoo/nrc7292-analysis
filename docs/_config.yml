@@ -1,0 +1,25 @@
+title: NRC7292 Analysis Blog
+description: Code analysis and research documentation for NRC7292 HaLow driver
+baseurl: "/nrc7292-analysis"
+url: "https://oyongjoo.github.io"
+
+markdown: kramdown
+highlighter: rouge
+theme: minima
+
+plugins:
+  - jekyll-feed
+  - jekyll-sitemap
+
+collections:
+  posts:
+    output: true
+    permalink: /:categories/:year/:month/:day/:title/
+
+defaults:
+  - scope:
+      path: ""
+      type: "posts"
+    values:
+      layout: "post"
+      author: "Liam Lee"
