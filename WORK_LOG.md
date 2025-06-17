@@ -317,7 +317,51 @@ switch (i_sta->tx_ba_session[tid]) {
 
 블로그가 완전히 준비되었습니다!
 
+#### Q6: GitHub Pages 404 Error Fix
+**Question**: 404 error가 발생하면서 페이지가 안열려
+**Answer**: GitHub Pages 404 오류를 해결했습니다.
+
+**문제 원인 및 해결:**
+
+**1. 브랜치 문제**
+- GitHub Pages는 main 브랜치를 기본으로 사용
+- master에서 main 브랜치 생성하고 푸시 완료
+
+**2. Jekyll 설정 문제**
+- 불필요한 플러그인 제거 (`jekyll-feed`, `jekyll-sitemap`)
+- GitHub Pages 호환 설정으로 단순화
+- collections 설정 제거하여 충돌 방지
+
+**3. 외부 의존성 문제**
+- CDN 링크 제거 (Prism.js)
+- 로컬 Rouge 하이라이터로 변경
+- Gemfile 추가로 의존성 관리
+
+**4. 수정된 설정**
+```yaml
+# 단순화된 _config.yml
+title: "NRC7292 Analysis Blog"
+baseurl: "/nrc7292-analysis"
+url: "https://oyongjoo.github.io"
+markdown: kramdown
+highlighter: rouge
+```
+
+**5. GitHub Pages 활성화 방법 (수정)**
+- Repository Settings > Pages
+- Source: "Deploy from a branch" 
+- Branch: **"main"** (master 아님)
+- Folder: "/docs"
+- Save
+
+**6. 추가된 파일**
+- `docs/Gemfile`: GitHub Pages 호환성
+- `docs/README.md`: 블로그 문서화
+- Rouge 구문 강조 CSS 스타일
+
+**예상 해결 시간**: 5-10분 후 https://oyongjoo.github.io/nrc7292-analysis/ 접근 가능
+
 ---
 *Last Updated: 2025-06-17*
-*Current Status: GitHub Pages blog successfully implemented and deployed*
-*Next Session: Continue with additional blog posts and GitHub Pages activation*
+*Current Status: GitHub Pages 404 error fixed, blog should be accessible*
+*Next Session: Continue with additional blog posts and verify deployment*
