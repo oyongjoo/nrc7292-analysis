@@ -1,0 +1,32 @@
+# Jekyll build files
+_site/
+.sass-cache/
+.jekyll-cache/
+.jekyll-metadata
+
+# Ruby/Bundle files
+vendor/
+.bundle/
+Gemfile.lock
+
+# IDE and editor files
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Build artifacts
+*.o
+*.ko
+*.a
+cli_app/cli_app
+cli_app/libcli_app.a

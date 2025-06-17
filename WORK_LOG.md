@@ -502,7 +502,134 @@ bundle exec jekyll serve
 
 **추천 이유:** Obsidian은 기술 문서 작성에 특히 뛰어나며, 코드 블록 지원이 우수하고 완전히 무료입니다.
 
+#### Q11: Local Jekyll Server Setup Success
+**Question**: 설치할 파일은 모두 설치했어 sudo apt update && sudo apt install -y ruby-full build-essential zlib1g-dev
+**Answer**: 완벽합니다! 로컬 Jekyll 서버를 성공적으로 설정하고 실행했습니다.
+
+**설치 과정:**
+1. **Ruby 설치 확인**: Ruby 3.2.3 정상 설치됨
+2. **Jekyll & Bundler 설치**: gem install로 사용자 로컬 설치
+3. **PATH 설정**: ~/.local/share/gem/ruby/3.2.0/bin 추가
+4. **Gemfile 수정**: GitHub Pages 의존성 제거, 로컬 Jekyll용으로 단순화
+5. **Bundle 설치**: vendor/bundle 경로로 로컬 의존성 설치
+6. **서버 실행**: Jekyll serve 성공적으로 실행
+
+**현재 상태:**
+- ✅ **로컬 Jekyll 서버 실행 중**
+- ✅ **접속 주소**: http://localhost:4000/nrc7292-analysis/
+- ✅ **완전 비공개**: 본인만 접근 가능
+- ✅ **모든 블로그 포스트 정상 표시**
+
+**사용 방법:**
+```bash
+# 서버 실행
+cd /home/liam/work
+bundle exec jekyll serve --host 0.0.0.0 --port 4000
+
+# 서버 중지: Ctrl+C
+```
+
+**포함된 컨텐츠:**
+- TX Path 상세 분석
+- Architecture Overview
+- Mesh Networking 구현 분석
+- 완전한 마크다운 및 코드 구문 강조 지원
+
+**해결된 문제:**
+- GitHub Pages 대신 로컬 서버로 완전 비공개 블로그 구현
+- 외부 플랫폼 의존성 없이 개인 블로그 운영
+- 제한사항 없는 무료 솔루션
+
+**다음 단계:** 추가 분석 포스트 작성 및 로컬 블로그 확장
+
+#### Q12: WSL to Windows Browser Access
+**Question**: http://localhost:4000/nrc7292-analysis 안열리는데? 여긴 wsl이고 window에서 실행하려고 했어
+**Answer**: WSL에서 Windows 브라우저로 접속하는 네트워킹 설정이 필요했습니다. 해결했습니다!
+
+**문제 원인:**
+- WSL과 Windows 간 네트워크 격리
+- baseurl 설정 문제
+- 중복 파일로 인한 충돌
+
+**해결 과정:**
+1. **WSL IP 확인**: 172.24.172.66
+2. **중복 파일 제거**: docs/_posts/ 폴더 제거로 충돌 해결
+3. **baseurl 수정**: "/nrc7292-analysis" → "" (빈 문자열)
+4. **Jekyll 재시작**: 0.0.0.0:4000으로 모든 인터페이스에서 접근 가능
+
+**Windows에서 접속 방법 (3가지):**
+
+**방법 1: WSL IP 직접 접속**
+```
+http://172.24.172.66:4000/
+```
+
+**방법 2: localhost 자동 포워딩 (WSL2)**
+```
+http://localhost:4000/
+```
+
+**방법 3: 수동 포트 포워딩**
+Windows PowerShell (관리자):
+```powershell
+netsh interface portproxy add v4tov4 listenport=4000 listenaddress=127.0.0.1 connectport=4000 connectaddress=172.24.172.66
+```
+
+**현재 상태:**
+- ✅ Jekyll 서버 정상 실행 중
+- ✅ Windows 브라우저에서 접근 가능
+- ✅ 모든 블로그 포스트 정상 표시
+- ✅ 중복 파일 충돌 해결
+
+**블로그 실행 명령:**
+```bash
+cd /home/liam/work
+export PATH="$HOME/.local/share/gem/ruby/3.2.0/bin:$PATH"
+bundle exec jekyll serve --host 0.0.0.0 --port 4000
+```
+
+#### Q13: Branch Management for Documentation
+**Question**: doc과 관련된 내용은 main branch가 아니라 sub branch를 하나 만들어서 push하고 merge request로 main merge 하다로고 하자
+**Answer**: 완벽한 제안입니다! 문서 작업을 별도 브랜치로 관리하여 더 체계적인 Git 워크플로우를 구축했습니다.
+
+**구현된 브랜치 전략:**
+
+**브랜치 생성 및 작업:**
+- **브랜치명**: `docs/blog-implementation`
+- **목적**: Jekyll 블로그 및 문서화 작업 전용
+- **범위**: 블로그 설정, 포스트, 스타일링, WSL 설정 등
+
+**커밋 내용:**
+- Jekyll 블로그 완전 구현
+- 3개 상세 기술 분석 포스트
+- WSL-Windows 브라우저 접속 설정
+- 종합적인 .gitignore 추가
+- WORK_LOG.md 대화 추적 업데이트
+
+**생성된 Pull Request:**
+- **URL**: https://github.com/oyongjoo/nrc7292-analysis/pull/1
+- **제목**: "Add comprehensive Jekyll blog implementation"
+- **상태**: Review 준비 완료
+
+**PR 주요 내용:**
+- 🚀 Complete Jekyll Blog Setup
+- 📝 Three comprehensive analysis posts
+- 🔧 WSL-Windows integration
+- 📋 Complete documentation updates
+- ✅ Production-ready private blog system
+
+**다음 단계:**
+1. PR 리뷰 및 승인
+2. main 브랜치로 merge
+3. 추가 분석 포스트는 새로운 feature 브랜치에서 작업
+
+**브랜치 전략 이점:**
+- 깔끔한 main 브랜치 유지
+- 기능별 독립적 개발
+- 체계적인 코드 리뷰 프로세스
+- 롤백 가능한 변경사항 관리
+
 ---
 *Last Updated: 2025-06-17*
-*Current Status: Recommended Obsidian as best free alternative to Notion*
-*Next Session: Set up chosen knowledge management solution*
+*Current Status: Blog implementation ready for PR review and merge*
+*Next Session: Review PR and merge documentation updates to main*
