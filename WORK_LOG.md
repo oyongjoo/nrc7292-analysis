@@ -468,7 +468,41 @@ bundle exec jekyll serve
 
 **설정 도움이 필요하시면** 어떤 방법을 선호하는지 알려주세요!
 
+#### Q10: Notion Free Tier Limitations
+**Question**: notion도 무료로 사용하는 경우 기능이 매운 제한적인것 같던데
+**Answer**: 맞습니다! Notion 무료 버전은 여러 제한사항이 있습니다. 더 나은 완전 무료 대안들을 제안드립니다.
+
+**Notion 무료 버전 제한사항:**
+- 블록 수 제한 (최근 완화되었지만 여전히 존재)
+- 파일 업로드 크기 제한 (5MB)
+- 게스트 수 제한
+- 버전 히스토리 제한
+- API 호출 제한
+
+**완전 무료 + 강력한 대안들:**
+
+**🌟 가장 추천: Obsidian**
+- 완전 무료 (개인 사용)
+- 로컬 저장 (완전 비공개)
+- 마크다운 지원 (기존 블로그 포스트 그대로 사용)
+- 그래프 뷰 (문서 간 연결 시각화)
+- 강력한 플러그인 생태계
+- 빠른 검색 및 백링크
+
+**다른 무료 대안들:**
+- **Zettlr**: 오픈소스 마크다운 에디터
+- **Logseq**: 오픈소스 개인 지식 관리
+- **VuePress**: 로컬 정적 사이트 생성기
+- **Foam**: VSCode 기반 지식 관리
+
+**Obsidian 설정 가이드:**
+- `obsidian-setup.md` 파일에 상세 설정 방법 작성
+- 기존 블로그 포스트를 Obsidian으로 이동하는 방법 포함
+- 폴더 구조 및 유용한 플러그인 리스트 제공
+
+**추천 이유:** Obsidian은 기술 문서 작성에 특히 뛰어나며, 코드 블록 지원이 우수하고 완전히 무료입니다.
+
 ---
 *Last Updated: 2025-06-17*
-*Current Status: Provided private blog alternative solutions*
-*Next Session: Implement chosen private blog solution*
+*Current Status: Recommended Obsidian as best free alternative to Notion*
+*Next Session: Set up chosen knowledge management solution*
