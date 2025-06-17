@@ -416,7 +416,118 @@ if ((int)atomic_read(&nw->fw_state) != NRC_FW_ACTIVE) {
 }
 ```
 
-## 8. Related Structures and Data Types
+## 8. TX Tasklet Mechanism
+
+### 8.1 TX Tasklet Initialization
+
+The TX tasklet is configured during driver initialization (`nrc-init.c`, lines 816-822):
+
+```c
+#ifdef CONFIG_USE_TXQ
+#ifdef CONFIG_NEW_TASKLET_API
+    tasklet_setup(&nw->tx_tasklet, nrc_tx_tasklet);
+#else
+    tasklet_init(&nw->tx_tasklet, nrc_tx_tasklet, (unsigned long) nw);
+#endif
+#endif
+```
+
+**Kernel API Explanation**:
+- `tasklet_setup()`: New kernel API (5.0+), provides type safety
+- `tasklet_init()`: Legacy API, uses unsigned long parameter
+- `CONFIG_USE_TXQ`: Only activated when using TXQ-based transmission queues
+
+### 8.2 TX Tasklet Implementation (`nrc-mac80211.c`, lines 545-569)
+
+```c
+#ifdef CONFIG_NEW_TASKLET_API
+void nrc_tx_tasklet(struct tasklet_struct *t)
+{
+    struct nrc *nw = from_tasklet(nw, t, tx_tasklet);
+#else
+void nrc_tx_tasklet(unsigned long cookie)
+{
+    struct nrc *nw = (struct nrc *)cookie;
+#endif
+    struct nrc_txq *ntxq, *tmp;
+    int ret;
+
+    spin_lock_bh(&nw->txq_lock);
+
+    list_for_each_entry_safe(ntxq, tmp, &nw->txq, list) {
+        ret = nrc_push_txq(nw, ntxq); /* 0: all SKBs sent, 1: credits exhausted */
+        if (ret == 0) {
+            list_del_init(&ntxq->list);
+        } else { /* When credits insufficient, give chance to next txq */
+            list_move_tail(&ntxq->list, &nw->txq);
+            break;
+        }
+    }
+
+    spin_unlock_bh(&nw->txq_lock);
+}
+```
+
+**Key Features**:
+1. **Bottom-half Processing**: Fast execution in interrupt context
+2. **Spinlock Protection**: Concurrency control with `txq_lock`
+3. **Round-robin Scheduling**: Move queue to list end when credits insufficient
+4. **Safe Traversal**: Uses `list_for_each_entry_safe()` for safe deletion during traversal
+
+### 8.3 TX Tasklet Scheduling
+
+The tasklet is scheduled in the `nrc_kick_txq()` function (`nrc-mac80211.c`, line 587):
+
+```c
+void nrc_kick_txq(struct nrc *nw)
+{
+    if (nw->drv_state != NRC_DRV_RUNNING)
+        return;
+
+    tasklet_schedule(&nw->tx_tasklet);
+}
+```
+
+**Invocation Points**:
+1. **Credit Report Events**: When firmware returns credits
+2. **Wake TX Queue Callback**: When new packets arrive from mac80211
+3. **Power Management Exit**: When returning from power save mode
+
+### 8.4 TXQ Processing Mechanism
+
+The `nrc_push_txq()` function handles actual packet transmission:
+
+```c
+static int nrc_push_txq(struct nrc *nw, struct nrc_txq *ntxq)
+{
+    // 1. Extract packets from TXQ
+    // 2. Check credits
+    // 3. Transmit via HIF layer
+    // 4. Return value: 0=complete, 1=credits insufficient
+}
+```
+
+**Processing Order**:
+1. Dequeue SKBs from TXQ
+2. Check per-AC credit availability
+3. Call `nrc_xmit_frame()` when credits sufficient
+4. Stop processing when credits insufficient, wait for next opportunity
+
+### 8.5 Performance Optimization Elements
+
+#### Batch Processing
+- Process multiple TXQs in single tasklet execution
+- Transmit maximum packets while credits available
+
+#### Fairness Guarantee
+- Maintain fairness between TXQs using round-robin approach
+- Give opportunities to other TXQs when credits insufficient
+
+#### Latency Minimization
+- Fast responsiveness through bottom-half processing
+- Minimal blocking using spinlocks
+
+## 9. Related Structures and Data Types
 
 ### 8.1 Core Structures
 

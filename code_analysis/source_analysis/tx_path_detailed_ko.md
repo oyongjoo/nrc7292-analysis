@@ -416,7 +416,118 @@ if ((int)atomic_read(&nw->fw_state) != NRC_FW_ACTIVE) {
 }
 ```
 
-## 8. 관련 구조체와 데이터 타입
+## 8. TX Tasklet 메커니즘
+
+### 8.1 TX Tasklet 초기화
+
+TX tasklet은 드라이버 초기화 시 설정됩니다 (`nrc-init.c`, 라인 816-822):
+
+```c
+#ifdef CONFIG_USE_TXQ
+#ifdef CONFIG_NEW_TASKLET_API
+    tasklet_setup(&nw->tx_tasklet, nrc_tx_tasklet);
+#else
+    tasklet_init(&nw->tx_tasklet, nrc_tx_tasklet, (unsigned long) nw);
+#endif
+#endif
+```
+
+**커널 API 설명**:
+- `tasklet_setup()`: 새로운 커널 API (5.0+), 타입 안전성 제공
+- `tasklet_init()`: 레거시 API, unsigned long 파라미터 사용
+- `CONFIG_USE_TXQ`: TXQ 기반 전송 큐 사용 시에만 활성화
+
+### 8.2 TX Tasklet 구현 (`nrc-mac80211.c`, 라인 545-569)
+
+```c
+#ifdef CONFIG_NEW_TASKLET_API
+void nrc_tx_tasklet(struct tasklet_struct *t)
+{
+    struct nrc *nw = from_tasklet(nw, t, tx_tasklet);
+#else
+void nrc_tx_tasklet(unsigned long cookie)
+{
+    struct nrc *nw = (struct nrc *)cookie;
+#endif
+    struct nrc_txq *ntxq, *tmp;
+    int ret;
+
+    spin_lock_bh(&nw->txq_lock);
+
+    list_for_each_entry_safe(ntxq, tmp, &nw->txq, list) {
+        ret = nrc_push_txq(nw, ntxq); /* 0: 모든 SKB 전송, 1: 크레딧 소진 */
+        if (ret == 0) {
+            list_del_init(&ntxq->list);
+        } else { /* 크레딧 부족 시 다음 txq에게 기회 제공 */
+            list_move_tail(&ntxq->list, &nw->txq);
+            break;
+        }
+    }
+
+    spin_unlock_bh(&nw->txq_lock);
+}
+```
+
+**주요 특징**:
+1. **Bottom-half 처리**: 인터럽트 컨텍스트에서 빠른 실행
+2. **스핀락 보호**: `txq_lock`으로 동시성 제어
+3. **Round-robin 스케줄링**: 크레딧 부족 시 큐를 리스트 끝으로 이동
+4. **Safe 순회**: `list_for_each_entry_safe()` 사용으로 순회 중 삭제 안전
+
+### 8.3 TX Tasklet 스케줄링
+
+tasklet은 `nrc_kick_txq()` 함수에서 스케줄됩니다 (`nrc-mac80211.c`, 라인 587):
+
+```c
+void nrc_kick_txq(struct nrc *nw)
+{
+    if (nw->drv_state != NRC_DRV_RUNNING)
+        return;
+
+    tasklet_schedule(&nw->tx_tasklet);
+}
+```
+
+**호출 위치**:
+1. **크레딧 리포트 이벤트**: 펌웨어에서 크레딧 반환 시
+2. **Wake TX Queue 콜백**: mac80211에서 새로운 패킷 도착 시
+3. **전력 관리 해제**: 절전 모드에서 복귀 시
+
+### 8.4 TXQ 처리 메커니즘
+
+`nrc_push_txq()` 함수는 실제 패킷 전송을 담당합니다:
+
+```c
+static int nrc_push_txq(struct nrc *nw, struct nrc_txq *ntxq)
+{
+    // 1. TXQ에서 패킷 추출
+    // 2. 크레딧 확인
+    // 3. HIF 레이어로 전송
+    // 4. 반환값: 0=완료, 1=크레딧 부족
+}
+```
+
+**처리 순서**:
+1. TXQ에서 SKB 디큐
+2. AC별 크레딧 가용성 확인
+3. 크레딧 충분 시 `nrc_xmit_frame()` 호출
+4. 크레딧 부족 시 처리 중단, 다음 기회 대기
+
+### 8.5 성능 최적화 요소
+
+#### 배치 처리
+- 한 번의 tasklet 실행으로 여러 TXQ 처리
+- 크레딧이 있는 동안 최대한 많은 패킷 전송
+
+#### 공정성 보장
+- Round-robin 방식으로 TXQ 간 공정성 유지
+- 크레딧 부족 시 다른 TXQ에게 기회 제공
+
+#### 지연 최소화
+- Bottom-half 처리로 빠른 응답성
+- 스핀락 사용으로 최소한의 블로킹
+
+## 9. 관련 구조체와 데이터 타입
 
 ### 8.1 핵심 구조체
 
