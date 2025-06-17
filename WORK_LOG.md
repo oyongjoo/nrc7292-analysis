@@ -422,7 +422,53 @@ highlighter: rouge
 
 **보안 고려사항:** 코드 분석 블로그는 교육/공유 목적이므로 Public 저장소가 적합함
 
+#### Q9: Private Blog Alternative Solutions
+**Question**: public으로 전환한다는 것은 누구나 이 분석된 내용을 들여다 볼수 있다는 말인데, 그건 내가 싫거든.. 그냥 나만의 분석의 내용, 나만의 blog이면 되는데.. public이지만 공개는 안하는 방법도 있는건가?
+**Answer**: 완전히 이해합니다. 분석 내용을 비공개로 유지하면서 개인 블로그를 운영하는 여러 방법이 있습니다.
+
+**해결 방법 옵션:**
+
+**방법 1: 로컬 Jekyll 서버 (완전 비공개)**
+```bash
+# 로컬에서만 블로그 실행
+cd /home/liam/work
+bundle install
+bundle exec jekyll serve
+# http://localhost:4000 에서 접근 (본인만 접근 가능)
+```
+
+**방법 2: GitHub Pro 계정 ($4/월)**
+- Private 저장소에서 GitHub Pages 사용 가능
+- 완전 비공개 블로그 운영
+- 링크를 아는 사람만 접근 가능
+
+**방법 3: 대안 블로그 플랫폼**
+- **Notion**: 개인 페이지로 markdown 문서 작성
+- **Obsidian**: 로컬 markdown 문서 관리
+- **GitBook**: Private documentation
+- **Gitiles**: Self-hosted git repository viewer
+
+**방법 4: 별도 Private 블로그 저장소**
+- 새로운 private 저장소 생성 (nrc7292-blog-private)
+- 블로그 내용만 별도 관리
+- 분석 코드는 현재 저장소에 유지
+
+**방법 5: 로컬 Static Site Generator**
+```bash
+# 다른 도구들
+- Hugo (빠른 static site generator)
+- Gatsby (React 기반)
+- VuePress (Vue 기반)
+- MkDocs (Python 기반)
+```
+
+**추천:** 로컬 Jekyll 서버 + Notion 조합
+- 로컬 Jekyll: 기술 문서 정리
+- Notion: 일반 노트 및 정리
+
+**설정 도움이 필요하시면** 어떤 방법을 선호하는지 알려주세요!
+
 ---
 *Last Updated: 2025-06-17*
-*Current Status: Identified root cause - private repository blocks GitHub Pages*
-*Next Session: Verify repository visibility change and blog deployment*
+*Current Status: Provided private blog alternative solutions*
+*Next Session: Implement chosen private blog solution*
