@@ -98,6 +98,97 @@ if (ampdu_mode == NRC_AMPDU_AUTO) {
 - Unicast address
 - Not an EAPOL frame
 
+#### `setup_ba_session()` Function Detailed Analysis (`nrc-trx.c:229`)
+
+**Purpose**: Automatic AMPDU Block ACK session setup
+```c
+static void setup_ba_session(struct nrc *nw, struct ieee80211_vif *vif, struct sk_buff *skb)
+{
+    struct ieee80211_sta *peer_sta = NULL;
+    struct nrc_sta *i_sta = NULL;
+    struct ieee80211_hdr *qmh = (struct ieee80211_hdr *) skb->data;
+    int tid = *ieee80211_get_qos_ctl(qmh) & IEEE80211_QOS_CTL_TID_MASK;
+    int ret;
+    
+    // 1. Disable BA session when fragmentation enabled
+    if (nw->frag_threshold != -1) {
+        return;  // Ignore BA session if fragmentation set via iwconfig
+    }
+    
+    // 2. TID validation (0~7)
+    if (tid < 0 || tid >= NRC_MAX_TID) {
+        nrc_mac_dbg("Invalid TID(%d) with peer %pM", tid, qmh->addr1);
+        return;
+    }
+    
+    // 3. Find destination station
+    peer_sta = ieee80211_find_sta(vif, qmh->addr1);
+    if (!peer_sta) {
+        nrc_mac_dbg("Fail to find peer_sta (%pM)", qmh->addr1);
+        return;
+    }
+    
+    // 4. Force enable HT support for S1G channels
+#ifdef CONFIG_S1G_CHANNEL
+    peer_sta->ht_cap.ht_supported = true;
+#endif
+    
+    // 5. Get NRC station structure
+    i_sta = to_i_sta(peer_sta);
+    if (!i_sta) {
+        nrc_mac_dbg("Fail to find nrc_sta (%pM)", qmh->addr1);
+        return;
+    }
+    
+    // 6. Handle BA session state
+    switch (i_sta->tx_ba_session[tid]) {
+        case IEEE80211_BA_NONE:
+        case IEEE80211_BA_CLOSE:
+            nrc_dbg(NRC_DBG_STATE, "Setting up BA session for Tx TID %d with peer (%pM)",
+                    tid, peer_sta->addr);
+            nw->ampdu_supported = true;
+            nw->ampdu_reject = false;
+            
+            ret = ieee80211_start_tx_ba_session(peer_sta, tid, 0);
+            if (ret == -EBUSY) {
+                nrc_dbg(NRC_DBG_STATE, "receiver does not want A-MPDU (TID:%d)", tid);
+                i_sta->tx_ba_session[tid] = IEEE80211_BA_DISABLE;
+            } else if (ret == -EAGAIN) {
+                nrc_dbg(NRC_DBG_STATE, "session is not idle (TID:%d)", tid);
+                ieee80211_stop_tx_ba_session(peer_sta, tid);
+                i_sta->tx_ba_session[tid] = IEEE80211_BA_NONE;
+                i_sta->ba_req_last_jiffies[tid] = 0;
+            }
+            break;
+            
+        case IEEE80211_BA_REJECT:
+            // Allow retry after 5 seconds
+            if (jiffies_to_msecs(jiffies - i_sta->ba_req_last_jiffies[tid]) > 5000) {
+                i_sta->tx_ba_session[tid] = IEEE80211_BA_NONE;
+                i_sta->ba_req_last_jiffies[tid] = 0;
+                nrc_dbg(NRC_DBG_STATE, "reset ba status(TID:%d)", tid);
+            }
+            break;
+            
+        default:
+            break;  // Don't touch ongoing sessions
+    }
+}
+```
+
+**Key Features**:
+1. **Automatic BA Session**: Automatically attempts AMPDU session setup during data transmission
+2. **Per-TID Management**: Independent BA session state management for each TID
+3. **Retry Logic**: Allows retry after 5 seconds for rejected sessions
+4. **Error Handling**: Handles various error conditions like EBUSY, EAGAIN
+5. **S1G Compatibility**: Force enables HT functionality for HaLow
+
+**BA Session States**:
+- `IEEE80211_BA_NONE`: No session (can be set up)
+- `IEEE80211_BA_CLOSE`: Session closed (can be re-established)
+- `IEEE80211_BA_REJECT`: Session rejected (retry after timeout)
+- `IEEE80211_BA_DISABLE`: Session disabled (no retry)
+
 ### 2.2 Station Mode Power Management (lines 115-184)
 
 #### Deep Sleep Handling (lines 146-177)

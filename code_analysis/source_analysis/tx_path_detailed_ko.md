@@ -98,6 +98,97 @@ if (ampdu_mode == NRC_AMPDU_AUTO) {
 - 유니캐스트 주소
 - EAPOL 프레임이 아님
 
+#### `setup_ba_session()` 함수 상세 분석 (`nrc-trx.c:229`)
+
+**목적**: AMPDU Block ACK 세션 자동 설정
+```c
+static void setup_ba_session(struct nrc *nw, struct ieee80211_vif *vif, struct sk_buff *skb)
+{
+    struct ieee80211_sta *peer_sta = NULL;
+    struct nrc_sta *i_sta = NULL;
+    struct ieee80211_hdr *qmh = (struct ieee80211_hdr *) skb->data;
+    int tid = *ieee80211_get_qos_ctl(qmh) & IEEE80211_QOS_CTL_TID_MASK;
+    int ret;
+    
+    // 1. 프래그멘테이션 활성화 시 BA 세션 비활성화
+    if (nw->frag_threshold != -1) {
+        return;  // iwconfig로 fragmentation 설정 시 BA 세션 무시
+    }
+    
+    // 2. TID 유효성 검증 (0~7)
+    if (tid < 0 || tid >= NRC_MAX_TID) {
+        nrc_mac_dbg("Invalid TID(%d) with peer %pM", tid, qmh->addr1);
+        return;
+    }
+    
+    // 3. 목적지 스테이션 찾기
+    peer_sta = ieee80211_find_sta(vif, qmh->addr1);
+    if (!peer_sta) {
+        nrc_mac_dbg("Fail to find peer_sta (%pM)", qmh->addr1);
+        return;
+    }
+    
+    // 4. S1G 채널에서 HT 지원 강제 활성화
+#ifdef CONFIG_S1G_CHANNEL
+    peer_sta->ht_cap.ht_supported = true;
+#endif
+    
+    // 5. NRC 스테이션 구조체 획득
+    i_sta = to_i_sta(peer_sta);
+    if (!i_sta) {
+        nrc_mac_dbg("Fail to find nrc_sta (%pM)", qmh->addr1);
+        return;
+    }
+    
+    // 6. BA 세션 상태별 처리
+    switch (i_sta->tx_ba_session[tid]) {
+        case IEEE80211_BA_NONE:
+        case IEEE80211_BA_CLOSE:
+            nrc_dbg(NRC_DBG_STATE, "Setting up BA session for Tx TID %d with peer (%pM)",
+                    tid, peer_sta->addr);
+            nw->ampdu_supported = true;
+            nw->ampdu_reject = false;
+            
+            ret = ieee80211_start_tx_ba_session(peer_sta, tid, 0);
+            if (ret == -EBUSY) {
+                nrc_dbg(NRC_DBG_STATE, "receiver does not want A-MPDU (TID:%d)", tid);
+                i_sta->tx_ba_session[tid] = IEEE80211_BA_DISABLE;
+            } else if (ret == -EAGAIN) {
+                nrc_dbg(NRC_DBG_STATE, "session is not idle (TID:%d)", tid);
+                ieee80211_stop_tx_ba_session(peer_sta, tid);
+                i_sta->tx_ba_session[tid] = IEEE80211_BA_NONE;
+                i_sta->ba_req_last_jiffies[tid] = 0;
+            }
+            break;
+            
+        case IEEE80211_BA_REJECT:
+            // 5초 후 재시도 허용
+            if (jiffies_to_msecs(jiffies - i_sta->ba_req_last_jiffies[tid]) > 5000) {
+                i_sta->tx_ba_session[tid] = IEEE80211_BA_NONE;
+                i_sta->ba_req_last_jiffies[tid] = 0;
+                nrc_dbg(NRC_DBG_STATE, "reset ba status(TID:%d)", tid);
+            }
+            break;
+            
+        default:
+            break;  // 진행중인 세션은 건드리지 않음
+    }
+}
+```
+
+**핵심 특징**:
+1. **자동 BA 세션**: 데이터 전송 시 자동으로 AMPDU 세션 설정 시도
+2. **TID별 관리**: 각 TID별로 독립적인 BA 세션 상태 관리
+3. **재시도 로직**: 거부된 세션에 대해 5초 후 재시도 허용
+4. **에러 처리**: EBUSY, EAGAIN 등 다양한 에러 상황 처리
+5. **S1G 호환성**: HaLow에서 HT 기능 강제 활성화
+
+**BA 세션 상태**:
+- `IEEE80211_BA_NONE`: 세션 없음 (설정 가능)
+- `IEEE80211_BA_CLOSE`: 세션 종료됨 (재설정 가능)
+- `IEEE80211_BA_REJECT`: 세션 거부됨 (타임아웃 후 재시도)
+- `IEEE80211_BA_DISABLE`: 세션 비활성화됨 (재시도 안함)
+
 ### 2.2 스테이션 모드 전력 관리 (라인 115-184)
 
 #### Deep Sleep 처리 (라인 146-177)
@@ -167,6 +258,101 @@ for (h = &__tx_h_start; h < &__tx_h_end; h++) {
     if (res < 0)
         goto txh_out;
 }
+```
+
+### 3.4 주요 TX 핸들러 상세 분석
+
+#### `tx_h_debug_print()` (`nrc-trx.c:322`)
+**목적**: 디버깅용 프레임 정보 출력
+```c
+static int tx_h_debug_print(struct nrc_trx_data *tx)
+{
+    struct ieee80211_sta *sta;
+    struct nrc_vif *i_vif;
+    struct nrc_sta *i_sta;
+    const struct ieee80211_hdr *hdr;
+    __le16 fc;
+    
+    // 프레임 헤더 파싱 및 정보 출력
+    hdr = (void *) tx->skb->data;
+    fc = hdr->frame_control;
+    
+    nrc_dbg(NRC_DBG_TX, "TX: %s frame to %pM", 
+            ieee80211_is_data(fc) ? "Data" : "Mgmt", hdr->addr1);
+}
+```
+**특징**: `NRC_DBG_PRINT_FRAME_TX` 플래그 활성화 시에만 동작
+
+#### `tx_h_debug_state()` (`nrc-trx.c:378`)
+**목적**: STA 연결 상태 검증
+```c
+static int tx_h_debug_state(struct nrc_trx_data *tx)
+{
+    if (tx->vif->type == NL80211_IFTYPE_STATION) {
+        if (!tx->nw->associated_vif) {
+            nrc_mac_dbg("STA not associated, dropping data frame");
+            return -1;  // 패킷 드롭
+        }
+    }
+    return 0;
+}
+```
+**기능**: 비연결 상태에서 데이터 프레임 전송 시 패킷 드롭
+
+#### `tx_h_wfa_halow_filter()` (`nrc-trx.c:411`)
+**목적**: WFA HaLow 인증을 위한 특수 프레임 필터링
+```c
+static int tx_h_wfa_halow_filter(struct nrc_trx_data *tx)
+{
+    if (wfa_halow_filter) {
+        // WFA 테스트를 위한 특정 프레임 차단
+        return -1;  // 선택적 프레임 드롭
+    }
+    return 0;
+}
+```
+**용도**: WFA 인증 테스트에서 프레임 선택적 드롭
+
+#### `tx_h_put_iv()` (`nrc-trx.c:525`)
+**목적**: 암호화를 위한 IV 헤더 공간 확보
+```c
+static int tx_h_put_iv(struct nrc_trx_data *tx)
+{
+    struct ieee80211_tx_info *info = IEEE80211_SKB_CB(tx->skb);
+    
+    if (info->control.hw_key) {
+        // IV를 위한 헤드룸 확보
+        skb_push(tx->skb, info->control.hw_key->iv_len);
+        memset(tx->skb->data, 0, info->control.hw_key->iv_len);
+    }
+    return 0;
+}
+```
+**설명**: 하드웨어 암호화 시 IV(Initialization Vector) 공간 할당
+
+#### `tx_h_put_qos_control()` (`nrc-trx.c:579`)
+**목적**: non-QoS 데이터를 QoS 데이터로 변환
+```c
+static int tx_h_put_qos_control(struct nrc_trx_data *tx)
+{
+    struct ieee80211_hdr *hdr = (void *) tx->skb->data;
+    __le16 fc = hdr->frame_control;
+    
+    if (ieee80211_is_data(fc) && !ieee80211_is_data_qos(fc)) {
+        // QoS 헤더 공간 확보
+        skb_push(tx->skb, 2);
+        memmove(tx->skb->data, tx->skb->data + 2, 24);
+        
+        // 프레임 타입을 QoS 데이터로 변경
+        hdr->frame_control |= cpu_to_le16(IEEE80211_STYPE_QOS_DATA);
+        
+        // QoS 제어 필드 설정 (TID=0)
+        *((u16 *)(tx->skb->data + 24)) = 0;
+    }
+    return 0;
+}
+```
+**이유**: HaLow에서 모든 데이터 프레임을 QoS로 처리
 ```
 
 ### 3.4 주요 TX 핸들러들
