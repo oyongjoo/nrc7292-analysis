@@ -117,6 +117,24 @@ pre code {
     padding: 0;
 }
 
+/* Rouge syntax highlighting */
+.highlight {
+    background: #f8f9fa;
+    border-radius: 6px;
+    border: 1px solid #e1e4e8;
+}
+
+.highlight .c { color: #6a737d; font-style: italic; } /* Comment */
+.highlight .k { color: #d73a49; font-weight: bold; } /* Keyword */
+.highlight .s { color: #032f62; } /* String */
+.highlight .nf { color: #6f42c1; } /* Function name */
+.highlight .n { color: #24292e; } /* Name */
+.highlight .o { color: #d73a49; } /* Operator */
+.highlight .p { color: #24292e; } /* Punctuation */
+.highlight .cp { color: #d73a49; font-weight: bold; } /* Preprocessor */
+.highlight .kt { color: #d73a49; font-weight: bold; } /* Type */
+.highlight .nc { color: #6f42c1; font-weight: bold; } /* Class name */
+
 blockquote {
     border-left: 4px solid #0066cc;
     margin: 1rem 0;
