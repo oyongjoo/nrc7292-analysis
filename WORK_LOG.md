@@ -391,7 +391,38 @@ highlighter: rouge
 
 **대안이 작동하지 않으면:** GitHub Pages 활성화 상태 및 저장소 public 설정 확인 필요
 
+#### Q8: Private Repository GitHub Pages Issue
+**Question**: 저장소는 현재 private으로 되어 있는데 그럼 blog가 동작을 안하는건가?
+**Answer**: 네, 맞습니다! **Private 저장소는 GitHub Pages가 작동하지 않습니다.** 이것이 "Site not found" 오류의 실제 원인입니다.
+
+**GitHub Pages 제한사항:**
+- **Public 저장소**: 무료로 GitHub Pages 사용 가능 ✅
+- **Private 저장소**: GitHub Pro/Team/Enterprise 계정에서만 가능 ❌
+
+**해결 방법 2가지:**
+
+**방법 1: 저장소를 Public으로 변경 (권장)**
+1. GitHub 저장소 Settings 탭 이동
+2. 하단 "Danger Zone" 섹션으로 스크롤
+3. "Change repository visibility" 클릭
+4. "Change to public" 선택
+5. 저장소명 확인 입력: `oyongjoo/nrc7292-analysis`
+6. "I understand, change repository visibility" 클릭
+
+**방법 2: GitHub Pro 계정 업그레이드**
+- 월 $4로 Private 저장소에서도 GitHub Pages 사용 가능
+
+**Public 변경 후 설정:**
+- Settings > Pages
+- Source: "Deploy from a branch"
+- Branch: "main", Folder: "/ (root)"
+- Save 클릭
+
+**예상 결과:** Public 변경 후 5-10분 내 https://oyongjoo.github.io/nrc7292-analysis/ 정상 접근 가능
+
+**보안 고려사항:** 코드 분석 블로그는 교육/공유 목적이므로 Public 저장소가 적합함
+
 ---
 *Last Updated: 2025-06-17*
-*Current Status: Applied alternative solution - blog files moved to root directory*
-*Next Session: Verify GitHub Pages deployment and continue with additional content*
+*Current Status: Identified root cause - private repository blocks GitHub Pages*
+*Next Session: Verify repository visibility change and blog deployment*
