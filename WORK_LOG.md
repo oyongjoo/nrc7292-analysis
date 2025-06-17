@@ -361,7 +361,37 @@ highlighter: rouge
 
 **예상 해결 시간**: 5-10분 후 https://oyongjoo.github.io/nrc7292-analysis/ 접근 가능
 
+#### Q7: Site Not Found Error - Alternative Solution
+**Question**: 여전히 site not found 라고 나오는데.. 업데이트된 내용들이 git push로 업로드가 되어 있는 상태야?
+**Answer**: 네, git push는 완료되었습니다. "Site not found" 문제 해결을 위해 추가 조치를 취했습니다.
+
+**문제 분석:**
+- Git push는 정상 완료됨 (main 브랜치에 모든 파일 업로드)
+- 문제는 GitHub Pages 설정 또는 /docs 폴더 인식 이슈
+
+**추가 해결 방법:**
+1. **루트 디렉토리 배포**: Jekyll 파일들을 저장소 루트로 복사
+2. **설정 단순화**: /docs 폴더 대신 루트 디렉토리 사용
+
+**GitHub Pages 설정 (업데이트):**
+- Repository Settings > Pages
+- Source: "Deploy from a branch"
+- Branch: "main" 
+- Folder: **"/ (root)"** (docs 대신)
+- Save
+
+**현재 상태:**
+- 모든 블로그 파일이 루트 디렉토리와 /docs 폴더 둘 다에 존재
+- GitHub Pages가 루트 디렉토리를 우선 인식하도록 설정
+
+**확인 방법:**
+1. GitHub 저장소에서 _config.yml, index.md 파일이 루트에 있는지 확인
+2. Settings > Pages에서 초록색 "Your site is live at..." 메시지 확인
+3. 5-10분 후 https://oyongjoo.github.io/nrc7292-analysis/ 접속
+
+**대안이 작동하지 않으면:** GitHub Pages 활성화 상태 및 저장소 public 설정 확인 필요
+
 ---
 *Last Updated: 2025-06-17*
-*Current Status: GitHub Pages 404 error fixed, blog should be accessible*
-*Next Session: Continue with additional blog posts and verify deployment*
+*Current Status: Applied alternative solution - blog files moved to root directory*
+*Next Session: Verify GitHub Pages deployment and continue with additional content*
