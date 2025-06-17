@@ -1,42 +1,42 @@
-# NRC7292 코드 분석 폴더
+# NRC7292 Code Analysis Folder
 
-이 폴더는 NRC7292 HaLow 드라이버 코드 분석을 위한 학습 자료들을 정리하는 공간입니다.
+This folder organizes learning materials for NRC7292 HaLow driver code analysis.
 
-## 폴더 구조
+## Folder Structure
 
 ```
 code_analysis/
-├── README.md              # 이 파일
-├── architecture/          # 아키텍처 분석
-├── driver_components/     # 드라이버 구성 요소별 분석
-├── protocols/            # 통신 프로토콜 분석
-├── regulatory/           # 규제 도메인 분석
-├── testing/              # 테스트 관련 분석
-└── notes/               # 학습 노트 및 메모
+├── README.md              # This file
+├── architecture/          # Architecture analysis
+├── driver_components/     # Driver component analysis
+├── protocols/            # Communication protocol analysis
+├── regulatory/           # Regulatory domain analysis
+├── testing/              # Test-related analysis
+└── notes/               # Learning notes and memos
 ```
 
-## 분석 목표
+## Analysis Objectives
 
-1. **드라이버 아키텍처 이해**
-   - Linux mac80211 프레임워크와의 통합
-   - HIF (Hardware Interface) 레이어 구조
-   - WIM (Wireless Interface Module) 프로토콜
+1. **Driver Architecture Understanding**
+   - Integration with Linux mac80211 framework
+   - HIF (Hardware Interface) layer structure
+   - WIM (Wireless Interface Module) protocol
 
-2. **HaLow 기술 특성 파악**
-   - Sub-1GHz 동작 방식
-   - 전력 관리 메커니즘
-   - 메시 네트워킹 지원
+2. **HaLow Technology Characteristics**
+   - Sub-1GHz operation principles
+   - Power management mechanisms
+   - Mesh networking support
 
-3. **국가별 규제 준수**
-   - 각국 채널 계획 분석
-   - 전력 제한 및 보드 데이터
-   - 특수 요구사항 (LBT, MIC 등)
+3. **Regulatory Compliance by Country**
+   - Channel plan analysis by country
+   - Power limits and board data
+   - Special requirements (LBT, MIC, etc.)
 
-4. **코드 품질 및 유지보수성**
-   - 커널 버전 호환성
-   - 에러 처리 패턴
-   - 테스트 커버리지
+4. **Code Quality and Maintainability**
+   - Kernel version compatibility
+   - Error handling patterns
+   - Test coverage
 
-## 시작하기
+## Getting Started
 
-각 하위 폴더에서 해당 영역의 코드를 분석하고 학습 자료를 작성하세요.
+Analyze code in each subdirectory and create learning materials for the respective areas.

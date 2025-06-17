@@ -1,48 +1,48 @@
-# NRC7292 드라이버 아키텍처 개요
+# NRC7292 Driver Architecture Overview
 
-## 전체 구조
+## Overall Structure
 
 ```
-Linux 커널 공간
-├── mac80211 서브시스템
-│   └── nrc-mac80211.c/.h     # mac80211 인터페이스 레이어
-├── 네트워크 스택
-│   └── cfg80211              # 무선 설정 프레임워크
-└── 하드웨어 추상화
-    ├── nrc-hif-cspi.c/.h     # CSPI 하드웨어 인터페이스
-    ├── nrc-trx.c             # TX/RX 패킷 처리
-    └── wim.c/.h              # WIM 프로토콜 구현
+Linux Kernel Space
+├── mac80211 subsystem
+│   └── nrc-mac80211.c/.h     # mac80211 interface layer
+├── Network stack
+│   └── cfg80211              # Wireless configuration framework
+└── Hardware abstraction
+    ├── nrc-hif-cspi.c/.h     # CSPI hardware interface
+    ├── nrc-trx.c             # TX/RX packet processing
+    └── wim.c/.h              # WIM protocol implementation
 
-사용자 공간
-├── CLI 애플리케이션
-│   └── cli_app/              # 설정 및 관리 도구
-└── 설정 스크립트
-    └── start.py/stop.py      # 네트워크 모드 제어
+User Space
+├── CLI application
+│   └── cli_app/              # Configuration and management tools
+└── Configuration scripts
+    └── start.py/stop.py      # Network mode control
 ```
 
-## 주요 구성 요소
+## Main Components
 
-### 1. MAC 레이어 (nrc-mac80211.c)
-- Linux mac80211과의 인터페이스
-- 가상 인터페이스 관리 (최대 2개)
-- 스테이션/AP/메시 모드 지원
+### 1. MAC Layer (nrc-mac80211.c)
+- Interface with Linux mac80211
+- Virtual interface management (up to 2)
+- Station/AP/Mesh mode support
 
-### 2. 하드웨어 인터페이스 (HIF)
-- CSPI (Custom SPI) 프로토콜
-- 인터럽트 및 폴링 모드 지원
-- 펌웨어와의 통신 담당
+### 2. Hardware Interface (HIF)
+- CSPI (Custom SPI) protocol
+- Interrupt and polling mode support
+- Communication with firmware
 
-### 3. WIM 프로토콜
-- 명령/응답 기반 통신
-- 펌웨어 제어 및 설정
-- 상태 관리 및 동기화
+### 3. WIM Protocol
+- Command/response based communication
+- Firmware control and configuration
+- State management and synchronization
 
-### 4. 전력 관리
-- 다양한 절전 모드
-- 동적 전력 스케일링
-- 딥슬립 지원
+### 4. Power Management
+- Various power saving modes
+- Dynamic power scaling
+- Deep sleep support
 
-## 데이터 흐름
+## Data Flow
 
-1. **송신**: 사용자 데이터 → mac80211 → nrc-trx → HIF → 펌웨어
-2. **수신**: 펌웨어 → HIF → nrc-trx → mac80211 → 네트워크 스택
+1. **Transmit**: User data → mac80211 → nrc-trx → HIF → firmware
+2. **Receive**: Firmware → HIF → nrc-trx → mac80211 → network stack

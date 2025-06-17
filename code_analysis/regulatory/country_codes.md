@@ -1,46 +1,46 @@
-# 국가별 규제 도메인 분석
+# Country-specific Regulatory Domain Analysis
 
-## 지원 국가 목록
+## Supported Countries List
 
-| 코드 | 국가/지역 | 특수 요구사항 | 대역폭 | 비고 |
-|------|-----------|---------------|--------|------|
-| US   | 미국      | 없음          | 넓음   | 가장 많은 채널 지원 |
-| JP   | 일본      | 없음          | 제한적 | 5GHz 대역 일부만 사용 |
-| K1   | 한국 USN1 | LBT 필요      | 2MHz   | 비표준, 921-923MHz |
-| K2   | 한국 USN5 | MIC 검출 필요 | 6MHz   | 표준, 925-931MHz |
-| TW   | 대만      | 없음          | 보통   | 다양한 대역 지원 |
-| EU   | 유럽연합  | 없음          | 제한적 | 5GHz 대역 일부 |
-| CN   | 중국      | 없음          | 보통   | 7.xGHz 대역 사용 |
-| NZ   | 뉴질랜드  | 없음          | 넓음   | 호주와 유사 |
-| AU   | 호주      | 없음          | 넓음   | 뉴질랜드와 동일 |
+| Code | Country/Region | Special Requirements | Bandwidth | Notes |
+|------|----------------|----------------------|-----------|-------|
+| US   | United States  | None                 | Wide      | Most channels supported |
+| JP   | Japan          | None                 | Limited   | Partial 5GHz band only |
+| K1   | Korea USN1     | LBT required         | 2MHz      | Non-standard, 921-923MHz |
+| K2   | Korea USN5     | MIC detection req.   | 6MHz      | Standard, 925-931MHz |
+| TW   | Taiwan         | None                 | Medium    | Various band support |
+| EU   | European Union | None                 | Limited   | Partial 5GHz band |
+| CN   | China          | None                 | Medium    | 7.xGHz band usage |
+| NZ   | New Zealand    | None                 | Wide      | Similar to Australia |
+| AU   | Australia      | None                 | Wide      | Same as New Zealand |
 
-## 특수 기능 분석
+## Special Feature Analysis
 
 ### LBT (Listen Before Talk) - K1
 ```c
-// 필요한 구현 요소들
-- 채널 센싱 메커니즘
-- 백오프 알고리즘
-- 송신 전 대기 시간 관리
-- 간섭 검출 임계값 설정
+// Required implementation elements
+- Channel sensing mechanism
+- Backoff algorithm
+- Pre-transmission wait time management
+- Interference detection threshold setting
 ```
 
 ### MIC (Mutual Interference Cancellation) - K2
 ```c
-// 필요한 구현 요소들
-- 간섭 신호 분석
-- 적응형 필터링
-- 신호 분리 알고리즘
-- 실시간 처리 최적화
+// Required implementation elements
+- Interference signal analysis
+- Adaptive filtering
+- Signal separation algorithm
+- Real-time processing optimization
 ```
 
-## 채널 매핑
+## Channel Mapping
 
-각 국가별로 S1G 주파수를 기존 WiFi 채널로 매핑하여 호환성 확보.
+Each country maps S1G frequencies to existing WiFi channels to ensure compatibility.
 
-예: 미국의 경우
-- 9025MHz (S1G) → 2412MHz (WiFi 채널 1)
-- 9035MHz (S1G) → 2422MHz (WiFi 채널 3)
+Example: United States
+- 9025MHz (S1G) → 2412MHz (WiFi channel 1)
+- 9035MHz (S1G) → 2422MHz (WiFi channel 3)
 - ...
 
-이를 통해 기존 WiFi 도구들과의 호환성 유지.
+This maintains compatibility with existing WiFi tools.

@@ -1,20 +1,20 @@
-# NRC7292 HaLow 메시 네트워킹 구현 분석
+# NRC7292 HaLow Mesh Networking Implementation Analysis
 
-## 메시 네트워킹 개요
+## Mesh Networking Overview
 
-NRC7292 HaLow 드라이버는 IEEE 802.11s 표준 기반의 메시 네트워킹을 완전히 지원하며, Sub-1GHz 대역의 장점을 활용해 IoT 환경에 최적화된 메시 솔루션을 제공합니다.
+The NRC7292 HaLow driver fully supports IEEE 802.11s standard-based mesh networking and provides an IoT-optimized mesh solution by leveraging the advantages of the Sub-1GHz band.
 
-## 1. 메시 인터페이스 지원
+## 1. Mesh Interface Support
 
-### A. mac80211 통합
+### A. mac80211 Integration
 ```c
-// nrc-mac80211.c에서 메시 인터페이스 지원
+// Mesh interface support in nrc-mac80211.c
 static const struct ieee80211_iface_limit if_limits_multi[] = {
     {
         .max = 1,
         .types = BIT(NL80211_IFTYPE_STATION) |
                  BIT(NL80211_IFTYPE_AP) |
-                 BIT(NL80211_IFTYPE_MESH_POINT),  // 메시 포인트 지원
+                 BIT(NL80211_IFTYPE_MESH_POINT),  // Mesh point support
     },
     {
         .max = 1,
@@ -23,242 +23,242 @@ static const struct ieee80211_iface_limit if_limits_multi[] = {
     },
 };
 
-// 지원되는 인터페이스 모드
+// Supported interface modes
 hw->wiphy->interface_modes = 
     BIT(NL80211_IFTYPE_STATION) |
     BIT(NL80211_IFTYPE_AP) |
-    BIT(NL80211_IFTYPE_MESH_POINT) |    // 메시 포인트
+    BIT(NL80211_IFTYPE_MESH_POINT) |    // Mesh point
     BIT(NL80211_IFTYPE_MONITOR);
 ```
 
-### B. WIM 프로토콜 메시 지원
+### B. WIM Protocol Mesh Support
 ```c
-// nrc-wim-types.h에 정의된 메시 스테이션 타입
+// Mesh station type defined in nrc-wim-types.h
 enum WIM_STA_TYPE {
     WIM_STA_TYPE_STA = 0,
     WIM_STA_TYPE_AP,
     WIM_STA_TYPE_MONITOR,
-    WIM_STA_TYPE_MESH_POINT,     // 메시 포인트 타입
+    WIM_STA_TYPE_MESH_POINT,     // Mesh point type
     WIM_STA_TYPE_MAX
 };
 ```
 
-### C. 메시 인터페이스 설정
+### C. Mesh Interface Configuration
 ```c
-// 메시 인터페이스 추가 시 자동 신호 모니터링 활성화
+// Automatic signal monitoring activation when adding mesh interface
 static int nrc_mac_add_interface(struct ieee80211_hw *hw,
                                 struct ieee80211_vif *vif)
 {
     if (vif->type == NL80211_IFTYPE_MESH_POINT) {
-        // 메시 네트워크에서 신호 강도 모니터링 자동 활성화
+        // Automatically activate signal strength monitoring in mesh networks
         set_bit(NRC_VIF_SIGNAL_MONITOR, &i_vif->flags);
     }
 }
 ```
 
-## 2. HaLow 메시 기능 및 IEEE 802.11s 지원
+## 2. HaLow Mesh Features and IEEE 802.11s Support
 
-### A. 메시 노드 타입
+### A. Mesh Node Types
 ```c
-// 지원되는 메시 노드 구성
-1. MP (Mesh Point): 기본 메시 노드
-2. MPP (Mesh Portal Point): 인터넷 게이트웨이 노드
-3. MAP (Mesh Access Point): 하이브리드 AP + 메시 노드
+// Supported mesh node configurations
+1. MP (Mesh Point): Basic mesh node
+2. MPP (Mesh Portal Point): Internet gateway node
+3. MAP (Mesh Access Point): Hybrid AP + mesh node
 ```
 
-### B. 메시 보안 지원
+### B. Mesh Security Support
 ```bash
-# Open 메시 (보안 없음)
+# Open mesh (no security)
 mode=5
 mesh_fwding=1
 
-# WPA3-SAE 보안 메시
+# WPA3-SAE secure mesh
 mode=5
 sae=1
 mesh_fwding=1
-ieee80211w=2                # 관리 프레임 보호 (필수)
+ieee80211w=2                # Management frame protection (required)
 ```
 
-### C. 메시 설정 매개변수
+### C. Mesh Configuration Parameters
 ```conf
-# 메시 네트워크 기본 설정 (mp_halow_*.conf)
-mode=5                           # 메시 모드
-beacon_int=100                   # 100ms 비콘 간격
-dot11MeshRetryTimeout=1000       # 메시 재시도 타임아웃
-dot11MeshHoldingTimeout=400      # 메시 홀딩 타임아웃
-dot11MeshMaxRetries=4            # 최대 재시도 횟수
-mesh_rssi_threshold=-90          # 피어링 RSSI 임계값
-mesh_basic_rates=60 120 240      # 기본 전송률 (6, 12, 24 Mbps)
-mesh_max_inactivity=-1           # 비활성 타임아웃 비활성화
+# Mesh network basic configuration (mp_halow_*.conf)
+mode=5                           # Mesh mode
+beacon_int=100                   # 100ms beacon interval
+dot11MeshRetryTimeout=1000       # Mesh retry timeout
+dot11MeshHoldingTimeout=400      # Mesh holding timeout
+dot11MeshMaxRetries=4            # Maximum retry count
+mesh_rssi_threshold=-90          # Peering RSSI threshold
+mesh_basic_rates=60 120 240      # Basic rates (6, 12, 24 Mbps)
+mesh_max_inactivity=-1           # Disable inactivity timeout
 ```
 
-## 3. 메시 경로 선택 및 라우팅
+## 3. Mesh Path Selection and Routing
 
 ### A. HWMP (Hybrid Wireless Mesh Protocol)
 ```bash
-# 루트 모드 설정
+# Root mode configuration
 iw dev wlan0 set mesh_param mesh_hwmp_rootmode 2
 iw dev wlan0 set mesh_param mesh_hwmp_root_interval 1000
 
-# MPP 노드용 게이트웨이 알림
+# Gateway announcement for MPP nodes
 iw dev wlan0 set mesh_param mesh_gate_announcements 1
 
-# 피어 링크 타임아웃 (0 = 무한대)
+# Peer link timeout (0 = infinite)
 iw dev wlan0 set mesh_param mesh_plink_timeout 0
 
-# 경로 새로 고침 시간
+# Path refresh time
 iw dev wlan0 set mesh_param mesh_hwmp_path_refresh_time 1000
 ```
 
-### B. 수동 피어 관리
+### B. Manual Peer Management
 ```python
-# mesh_add_peer.py를 통한 피어 관리
+# Peer management through mesh_add_peer.py
 def add_mesh_peer(interface, peer_mac):
-    # 자동 피어링 비활성화 시 수동 피어 추가
+    # Manual peer addition when auto-peering is disabled
     cmd = f"wpa_cli -i {interface} mesh_peer_add {peer_mac}"
     subprocess.run(cmd, shell=True)
 
 def monitor_mesh_peers(interface):
-    # 피어 연결 상태 모니터링 및 재연결
+    # Monitor peer connectivity and reconnect
     while True:
         check_peer_connectivity()
         time.sleep(10)
 ```
 
-### C. Batman-adv 통합
+### C. Batman-adv Integration
 ```bash
-# 고급 메시 라우팅을 위한 batman-adv 지원
+# batman-adv support for advanced mesh routing
 echo 'batman-adv' >> /etc/modules
 modprobe batman-adv
 
-# 커널 메시 포워딩 비활성화
+# Disable kernel mesh forwarding
 iw dev wlan0 set mesh_param mesh_fwding 0
 
-# batman-adv 인터페이스 추가
+# Add batman-adv interface
 batctl if add wlan0
 ifconfig bat0 up
 ```
 
-## 4. Sub-1GHz 메시 최적화
+## 4. Sub-1GHz Mesh Optimization
 
-### A. 확장된 통신 거리
+### A. Extended Communication Range
 ```c
-// HaLow 메시의 장거리 통신 장점
-- 기존 WiFi 메시 대비 10배 확장된 통신 거리
-- 건물 침투력 향상으로 실내외 연결성 개선
-- 장애물 회피 능력 향상
+// Long-range communication advantages of HaLow mesh
+- 10x extended communication range compared to conventional WiFi mesh
+- Improved indoor/outdoor connectivity with enhanced building penetration
+- Enhanced obstacle avoidance capability
 ```
 
-### B. 저전력 메시 동작
+### B. Low-Power Mesh Operation
 ```conf
-# 배터리 구동 메시 노드용 전력 최적화
-power_save=2                     # 절전 모드 활성화
-beacon_int=200                   # 긴 비콘 간격 (200ms)
-dtim_period=3                    # DTIM 주기 연장
-mesh_max_inactivity=300000       # 5분 비활성 타임아웃
+# Power optimization for battery-powered mesh nodes
+power_save=2                     # Enable power save mode
+beacon_int=200                   # Longer beacon interval (200ms)
+dtim_period=3                    # Extended DTIM period
+mesh_max_inactivity=300000       # 5-minute inactivity timeout
 ```
 
-### C. S1G 채널 설정
+### C. S1G Channel Configuration
 ```python
-# 메시 네트워크용 채널 설정
+# Channel configuration for mesh networks
 def setup_mesh_channel():
     """
-    메시 네트워크용 최적 채널 설정
-    - 1MHz: 최대 거리, 최소 전력 소모
-    - 2MHz: 거리와 처리량의 균형
-    - 4MHz: 높은 처리량 애플리케이션
+    Optimal channel configuration for mesh networks
+    - 1MHz: Maximum range, minimum power consumption
+    - 2MHz: Balance between range and throughput
+    - 4MHz: High throughput applications
     """
     channels = {
-        'max_range': {'freq': 9025, 'bw': 1},      # 1MHz 대역폭
-        'balanced': {'freq': 9035, 'bw': 2},       # 2MHz 대역폭  
-        'high_throughput': {'freq': 9215, 'bw': 4} # 4MHz 대역폭
+        'max_range': {'freq': 9025, 'bw': 1},      # 1MHz bandwidth
+        'balanced': {'freq': 9035, 'bw': 2},       # 2MHz bandwidth  
+        'high_throughput': {'freq': 9215, 'bw': 4} # 4MHz bandwidth
     }
 ```
 
-## 5. 메시 프레임 처리
+## 5. Mesh Frame Processing
 
-### A. IEEE 802.11s 메시 헤더
+### A. IEEE 802.11s Mesh Header
 ```c
-// 표준 메시 헤더 처리
+// Standard mesh header processing
 struct ieee80211s_hdr {
-    u8 flags;                    // 메시 플래그
+    u8 flags;                    // Mesh flags
     u8 ttl;                      // Time To Live
-    __le32 seqnum;               // 시퀀스 번호
-    u8 eaddr1[ETH_ALEN];         // 확장 주소 1
-    u8 eaddr2[ETH_ALEN];         // 확장 주소 2 (선택적)
-    u8 eaddr3[ETH_ALEN];         // 확장 주소 3 (선택적)
+    __le32 seqnum;               // Sequence number
+    u8 eaddr1[ETH_ALEN];         // Extended address 1
+    u8 eaddr2[ETH_ALEN];         // Extended address 2 (optional)
+    u8 eaddr3[ETH_ALEN];         // Extended address 3 (optional)
 } __packed;
 ```
 
-### B. 메시 데이터 포워딩
+### B. Mesh Data Forwarding
 ```c
-// 펌웨어 레벨 메시 프레임 포워딩
-- 하드웨어/펌웨어 레벨에서 메시 프레임 포워딩 처리
-- 경로 선택 및 프레임 중복 제거
-- 브로드캐스트/멀티캐스트 플러딩 제어
+// Firmware-level mesh frame forwarding
+- Hardware/firmware level mesh frame forwarding processing
+- Path selection and frame deduplication
+- Broadcast/multicast flooding control
 ```
 
-### C. 경로 선택 프로토콜 메시지
+### C. Path Selection Protocol Messages
 ```c
-// HWMP 프로토콜 메시지 타입
-- PREQ (Path Request): 경로 요청
-- PREP (Path Reply): 경로 응답
-- PERR (Path Error): 경로 오류
-- RANN (Root Announcement): 루트 알림
+// HWMP protocol message types
+- PREQ (Path Request): Path request
+- PREP (Path Reply): Path reply
+- PERR (Path Error): Path error
+- RANN (Root Announcement): Root announcement
 ```
 
-## 6. 메시 네트워크 토폴로지
+## 6. Mesh Network Topology
 
-### A. 트리 기반 메시
+### A. Tree-based Mesh
 ```bash
-# 루트 노드 설정 (인터넷 게이트웨이)
+# Root node configuration (internet gateway)
 mesh_hwmp_rootmode=2
 mesh_gate_announcements=1
 mesh_hwmp_root_interval=1000
 
-# 리프 노드 설정
+# Leaf node configuration
 mesh_hwmp_rootmode=0
 mesh_gate_announcements=0
 ```
 
-### B. 완전 연결 메시
+### B. Full Mesh Connectivity
 ```bash
-# 모든 노드가 라우팅 가능한 설정
+# Configuration where all nodes can route
 mesh_hwmp_rootmode=0
 mesh_fwding=1
-no_auto_peer=0                   # 자동 피어링 활성화
+no_auto_peer=0                   # Enable auto-peering
 ```
 
-### C. 하이브리드 네트워크
+### C. Hybrid Network
 ```python
-# 메시 백본 + AP 액세스 포인트
+# Mesh backbone + AP access points
 def setup_hybrid_network():
     """
-    메시 백본 네트워크와 일반 클라이언트용 AP 동시 운영
+    Simultaneous operation of mesh backbone network and AP for regular clients
     """
-    # 메시 인터페이스 (wlan0)
+    # Mesh interface (wlan0)
     setup_mesh_interface('wlan0', mesh_id='IoT_Backbone')
     
-    # AP 인터페이스 (wlan1) 
+    # AP interface (wlan1) 
     setup_ap_interface('wlan1', ssid='IoT_Access')
     
-    # 브리지 연결
+    # Bridge connection
     setup_bridge(['wlan0', 'wlan1', 'eth0'])
 ```
 
-## 7. 메시 설정 및 배포
+## 7. Mesh Configuration and Deployment
 
-### A. 자동 메시 설정 스크립트
+### A. Automatic Mesh Configuration Script
 ```python
-# mesh.py - 메시 네트워크 자동 설정
+# mesh.py - Automatic mesh network configuration
 class MeshConfigurator:
     def setup_mesh_network(self, config):
         """
-        메시 네트워크 자동 설정
-        - 채널 및 전력 설정
-        - 보안 설정 (WPA3-SAE)
-        - 피어 검색 및 연결
-        - 라우팅 프로토콜 활성화
+        Automatic mesh network configuration
+        - Channel and power settings
+        - Security configuration (WPA3-SAE)
+        - Peer discovery and connection
+        - Routing protocol activation
         """
         self.configure_radio(config['channel'], config['power'])
         self.setup_security(config['security'])
@@ -266,150 +266,150 @@ class MeshConfigurator:
         self.configure_routing(config['routing'])
 ```
 
-### B. 브리지 및 NAT 지원
+### B. Bridge and NAT Support
 ```bash
-# 인터넷 게이트웨이 설정 (MPP 노드)
-# 브리지 모드 - 메시와 이더넷 연결
+# Internet gateway configuration (MPP node)
+# Bridge mode - connect mesh and ethernet
 brctl addbr br0
 brctl addif br0 wlan0
 brctl addif br0 eth0
 ifconfig br0 up
 
-# NAT 모드 - 인터넷 공유
+# NAT mode - internet sharing
 iptables -t nat -A POSTROUTING -o eth0 -j MASQUERADE
 iptables -A FORWARD -i wlan0 -o eth0 -j ACCEPT
 iptables -A FORWARD -i eth0 -o wlan0 -j ACCEPT
 echo 1 > /proc/sys/net/ipv4/ip_forward
 ```
 
-### C. DHCP 통합
+### C. DHCP Integration
 ```conf
-# 메시 네트워크용 DHCP 서버 설정
+# DHCP server configuration for mesh networks
 interface=br0
 dhcp-range=192.168.100.10,192.168.100.200,12h
-dhcp-option=3,192.168.100.1        # 기본 게이트웨이
-dhcp-option=6,8.8.8.8,8.8.4.4      # DNS 서버
+dhcp-option=3,192.168.100.1        # Default gateway
+dhcp-option=6,8.8.8.8,8.8.4.4      # DNS servers
 ```
 
-## 8. 성능 특성 및 확장성
+## 8. Performance Characteristics and Scalability
 
-### A. 확장성 기능
+### A. Scalability Features
 ```c
-// IEEE 802.11s 표준 지원 범위
-- 다중 홉 지원: 최대 32홉까지
-- 경로 선택: 에어타임 링크 메트릭 사용
-- 부하 분산: 다중 경로 지원으로 트래픽 분산
-- 자동 복구: 경로 장애 시 자동 우회 경로 설정
+// IEEE 802.11s standard support scope
+- Multi-hop support: Up to 32 hops
+- Path selection: Using airtime link metric
+- Load balancing: Traffic distribution with multi-path support
+- Automatic recovery: Automatic bypass path setup on path failure
 ```
 
-### B. IoT 최적화
+### B. IoT Optimization
 ```python
-# IoT 애플리케이션용 메시 최적화
+# Mesh optimization for IoT applications
 class IoTMeshOptimizer:
     def optimize_for_sensors(self):
         """
-        센서 네트워크용 최적화
-        - 낮은 지연 시간
-        - 높은 노드 밀도 지원
-        - 안정적인 경로 유지
-        - 전력 효율성
+        Optimization for sensor networks
+        - Low latency
+        - High node density support
+        - Stable path maintenance
+        - Power efficiency
         """
-        self.set_beacon_interval(100)      # 빠른 네이버 검색
-        self.set_path_refresh(30000)       # 경로 새로 고침 30초
-        self.enable_power_save(True)       # 절전 모드 활성화
-        self.set_retry_limit(2)            # 빠른 실패/복구
+        self.set_beacon_interval(100)      # Fast neighbor discovery
+        self.set_path_refresh(30000)       # 30-second path refresh
+        self.enable_power_save(True)       # Enable power save mode
+        self.set_retry_limit(2)            # Quick failure/recovery
 ```
 
-## 9. IoT 애플리케이션 장점
+## 9. IoT Application Advantages
 
-### A. 기존 WiFi 메시 대비 HaLow 메시 장점
+### A. HaLow Mesh Advantages over Conventional WiFi Mesh
 
-#### 커버리지 영역
+#### Coverage Area
 ```c
-// 커버리지 비교
-기존 WiFi 메시:  ~100m 노드 간 거리
-HaLow 메시:     ~1km 노드 간 거리 (10배 확장)
+// Coverage comparison
+Conventional WiFi mesh:  ~100m inter-node distance
+HaLow mesh:             ~1km inter-node distance (10x expansion)
 
-결과:
-- 인프라 요구사항 대폭 감소
-- 실외 및 농촌 지역 배포 개선
-- 사각지대 현상 감소
+Results:
+- Dramatically reduced infrastructure requirements
+- Improved outdoor and rural area deployment
+- Reduced dead zone phenomena
 ```
 
-#### 배터리 수명
+#### Battery Life
 ```c
-// 전력 소모 비교
-기존 WiFi 메시:  수일~수주 배터리 수명
-HaLow 메시:     수개월~수년 배터리 수명 (10배 향상)
+// Power consumption comparison
+Conventional WiFi mesh:  Days to weeks battery life
+HaLow mesh:             Months to years battery life (10x improvement)
 
-최적화 요소:
-- 효율적인 절전 프로토콜
-- 낮은 송신 전력
-- 간헐적 데이터 전송 최적화
+Optimization factors:
+- Efficient power save protocols
+- Low transmission power
+- Intermittent data transmission optimization
 ```
 
-#### 침투력
+#### Penetration Capability
 ```c
-// 신호 침투 능력
-기존 WiFi (2.4/5GHz): 벽 2-3개 통과 제한
-HaLow (Sub-1GHz):    벽 5-10개 통과 가능
+// Signal penetration capability
+Conventional WiFi (2.4/5GHz): Limited to 2-3 walls
+HaLow (Sub-1GHz):            Can penetrate 5-10 walls
 
-장점:
-- 건물 내부 완전 커버리지
-- 지하 시설 연결 가능
-- 산업 환경 내 안정적 통신
+Advantages:
+- Complete building coverage
+- Underground facility connectivity
+- Stable communication in industrial environments
 ```
 
-#### 디바이스 밀도
+#### Device Density
 ```c
-// 지원 디바이스 수
-기존 WiFi 메시:   ~50-100 디바이스/노드
-HaLow 메시:      ~1000-8000 디바이스/노드
+// Supported device count
+Conventional WiFi mesh:   ~50-100 devices/node
+HaLow mesh:              ~1000-8000 devices/node
 
-적용 분야:
-- 대규모 센서 네트워크
-- 스마트 시티 인프라
-- 산업 IoT 모니터링
+Application areas:
+- Large-scale sensor networks
+- Smart city infrastructure
+- Industrial IoT monitoring
 ```
 
-### B. 실제 배포 시나리오
+### B. Real Deployment Scenarios
 
-#### 스마트 팜
+#### Smart Farm
 ```python
-# 농업용 메시 네트워크
-- 토양 센서: 수분, 온도, pH 모니터링
-- 기상 스테이션: 강우량, 바람, 습도
-- 관개 제어: 원격 밸브 및 펌프 제어
-- 커버리지: 10-50 헥타르 단일 메시 네트워크
+# Agricultural mesh network
+- Soil sensors: Moisture, temperature, pH monitoring
+- Weather station: Rainfall, wind, humidity
+- Irrigation control: Remote valve and pump control
+- Coverage: 10-50 hectare single mesh network
 ```
 
-#### 스마트 시티
+#### Smart City
 ```python
-# 도시 인프라 모니터링
-- 대기질 센서: PM2.5, 오존, NO2
-- 교통 모니터링: 차량 카운터, 주차 센서
-- 스트리트 라이팅: 지능형 가로등 제어
-- 커버리지: 도시 전체 단일 메시 백본
+# Urban infrastructure monitoring
+- Air quality sensors: PM2.5, ozone, NO2
+- Traffic monitoring: Vehicle counters, parking sensors
+- Street lighting: Intelligent streetlight control
+- Coverage: City-wide single mesh backbone
 ```
 
-#### 산업 자동화
+#### Industrial Automation
 ```python
-# 공장 자동화 메시 네트워크
-- 기계 모니터링: 진동, 온도, 압력 센서
-- 자산 추적: RFID 및 위치 태그
-- 안전 시스템: 가스 검출, 화재 경보
-- 커버리지: 대형 공장 건물 전체
+# Factory automation mesh network
+- Machine monitoring: Vibration, temperature, pressure sensors
+- Asset tracking: RFID and location tags
+- Safety systems: Gas detection, fire alarms
+- Coverage: Entire large factory building
 ```
 
-## 10. 결론
+## 10. Conclusion
 
-NRC7292 HaLow 메시 구현은 IEEE 802.11s 표준을 완벽히 준수하면서도 Sub-1GHz 대역의 고유한 장점을 최대한 활용한 IoT 특화 솔루션입니다. 
+The NRC7292 HaLow mesh implementation is an IoT-specialized solution that fully complies with the IEEE 802.11s standard while maximizing the unique advantages of the Sub-1GHz band.
 
-**핵심 장점:**
-- **확장된 커버리지**: 기존 WiFi 대비 10배 향상된 통신 거리
-- **향상된 배터리 수명**: 수개월~수년 간 배터리 동작 
-- **높은 침투력**: 건물 및 장애물 통과 능력
-- **대규모 확장성**: 수천 개 노드 지원
-- **표준 호환성**: IEEE 802.11s 완전 준수
+**Key Advantages:**
+- **Extended Coverage**: 10x improved communication range compared to conventional WiFi
+- **Enhanced Battery Life**: Months to years of battery operation 
+- **High Penetration**: Building and obstacle penetration capability
+- **Large-scale Scalability**: Support for thousands of nodes
+- **Standards Compliance**: Full IEEE 802.11s compliance
 
-이러한 특징들로 인해 NRC7292 HaLow 메시는 기존 WiFi 메시로는 구현이 어려운 대규모 IoT 네트워크 배포에 이상적인 솔루션을 제공합니다.
+These characteristics make NRC7292 HaLow mesh an ideal solution for large-scale IoT network deployment that would be difficult to implement with conventional WiFi mesh.

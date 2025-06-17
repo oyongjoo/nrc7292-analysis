@@ -1,25 +1,25 @@
-# 초기 분석 결과
+# Initial Analysis Results
 
-## 프로젝트 특성
+## Project Characteristics
 
-### 1. HaLow (IEEE 802.11ah) 드라이버
-- Sub-1GHz 대역 사용으로 장거리 통신 지원
-- IoT/M2M 통신에 특화
-- 기존 WiFi와 호환성 유지하면서 확장된 기능 제공
+### 1. HaLow (IEEE 802.11ah) Driver
+- Long-range communication support using Sub-1GHz band
+- Specialized for IoT/M2M communications
+- Extended functionality while maintaining compatibility with existing WiFi
 
-### 2. 상용 제품 수준의 코드 품질
-- 광범위한 커널 버전 호환성 (5.0~5.18)
-- 포괄적인 국가별 규제 지원
-- 체계적인 에러 처리 및 검증
+### 2. Commercial-grade Code Quality
+- Extensive kernel version compatibility (5.0~5.18)
+- Comprehensive regulatory support by country
+- Systematic error handling and validation
 
-### 3. 복잡한 규제 환경 대응
-- 9개국/지역의 서로 다른 규제 요구사항
-- 특히 한국의 경우 두 개의 서로 다른 USN 대역 지원
-- 각국별 특수 기능 요구사항 (LBT, MIC 등)
+### 3. Complex Regulatory Environment Response
+- Different regulatory requirements across 9 countries/regions
+- Support for two different USN bands in Korea
+- Country-specific feature requirements (LBT, MIC, etc.)
 
-## 기술적 특징
+## Technical Features
 
-### 1. 계층화된 아키텍처
+### 1. Layered Architecture
 ```
 Application Layer (CLI, Scripts)
     ↓
@@ -32,36 +32,36 @@ Hardware Interface (CSPI)
 Firmware
 ```
 
-### 2. 유연한 설정 시스템
-- Python 기반 설정 스크립트
-- 국가별/모드별 설정 파일 분리
-- 동적 파라미터 조정 가능
+### 2. Flexible Configuration System
+- Python-based configuration scripts
+- Separate configuration files by country/mode
+- Dynamic parameter adjustment capability
 
-### 3. 포괄적인 테스트 프레임워크
-- 다양한 네트워크 시나리오 테스트
-- AMPDU, Block ACK, 보안 기능 테스트
-- 자동화된 드라이버 로드/언로드 테스트
+### 3. Comprehensive Test Framework
+- Various network scenario testing
+- AMPDU, Block ACK, security feature testing
+- Automated driver load/unload testing
 
-## 학습 포인트
+## Learning Points
 
-### 1. Linux 무선 드라이버 개발
-- mac80211 프레임워크 활용법
-- cfg80211 인터페이스 구현
-- 커널 모듈 개발 베스트 프랙티스
+### 1. Linux Wireless Driver Development
+- Utilizing mac80211 framework
+- cfg80211 interface implementation
+- Kernel module development best practices
 
-### 2. 하드웨어 추상화
-- SPI 기반 커스텀 프로토콜 구현
-- 인터럽트 vs 폴링 모드 선택
-- 펌웨어와의 효율적인 통신
+### 2. Hardware Abstraction
+- SPI-based custom protocol implementation
+- Interrupt vs polling mode selection
+- Efficient communication with firmware
 
-### 3. 규제 준수 설계
-- 다국가 지원을 위한 아키텍처
-- 보드 데이터 파일 형식 설계
-- 런타임 설정 변경 메커니즘
+### 3. Regulatory Compliance Design
+- Architecture for multi-country support
+- Board data file format design
+- Runtime configuration change mechanisms
 
-## 다음 분석 계획
+## Next Analysis Plan
 
-1. **WIM 프로토콜 상세 분석**
-2. **전력 관리 메커니즘 이해**
-3. **메시 네트워킹 구현 분석**
-4. **성능 최적화 기법 학습**
+1. **Detailed WIM Protocol Analysis**
+2. **Understanding Power Management Mechanisms**
+3. **Mesh Networking Implementation Analysis**
+4. **Learning Performance Optimization Techniques**

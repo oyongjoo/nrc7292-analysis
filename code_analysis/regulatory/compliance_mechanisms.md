@@ -1,74 +1,74 @@
-# NRC7292 규제 준수 메커니즘 분석
+# NRC7292 Regulatory Compliance Mechanisms Analysis
 
-## 규제 준수 개요
+## Regulatory Compliance Overview
 
-NRC7292 HaLow 드라이버는 전 세계 다양한 국가의 무선 규제를 준수하기 위한 포괄적인 다층 접근 방식을 구현합니다. 국가별 주파수 할당, 전력 제한, 특수 요구사항을 체계적으로 관리합니다.
+The NRC7292 HaLow driver implements a comprehensive multi-layered approach to comply with wireless regulations across various countries worldwide. It systematically manages country-specific frequency allocations, power limitations, and special requirements.
 
-## 1. 규제 프레임워크
+## 1. Regulatory Framework
 
-### A. 지원 국가/지역 코드 아키텍처
+### A. Supported Country/Region Code Architecture
 ```c
-// nrc-bd.c에 정의된 국가 코드 매핑
+// Country code mapping defined in nrc-bd.c
 enum CC_TYPE {
-    CC_US = 1,    // 미국 - 가장 포괄적인 주파수 할당 (902.5-927.5MHz)
-    CC_JP,        // 일본 - 제한적 할당 (917-927MHz)
-    CC_K1,        // 한국 USN1 - 비표준 대역 (921-923MHz) + LBT 요구
-    CC_K2,        // 한국 USN5 - MIC 대역 (925-931MHz) + MIC 검출 요구
-    CC_TW,        // 대만 - ISM 대역 (839-851MHz)
-    CC_EU,        // 유럽연합 - SRD 대역 (863.5-867.5MHz)
-    CC_CN,        // 중국 - 다중 서브밴드 (755.5-756.5, 779.5-786.5MHz)
-    CC_NZ,        // 뉴질랜드 - 미국과 유사하나 제한된 채널
-    CC_AU,        // 호주 - 뉴질랜드와 유사하나 지역별 제한
+    CC_US = 1,    // United States - Most comprehensive frequency allocation (902.5-927.5MHz)
+    CC_JP,        // Japan - Limited allocation (917-927MHz)
+    CC_K1,        // Korea USN1 - Non-standard band (921-923MHz) + LBT requirement
+    CC_K2,        // Korea USN5 - MIC band (925-931MHz) + MIC detection requirement
+    CC_TW,        // Taiwan - ISM band (839-851MHz)
+    CC_EU,        // European Union - SRD band (863.5-867.5MHz)
+    CC_CN,        // China - Multiple sub-bands (755.5-756.5, 779.5-786.5MHz)
+    CC_NZ,        // New Zealand - Similar to US but limited channels
+    CC_AU,        // Australia - Similar to New Zealand but regional restrictions
     CC_MAX
 };
 ```
 
-### B. 국가 코드 검증 및 매핑
+### B. Country Code Validation and Mapping
 ```c
-// nrc-bd.c:424-453 - 국가 코드 검증 로직
+// nrc-bd.c:424-453 - Country code validation logic
 if (country_code[0] == 'U' && country_code[1] == 'S')
     cc_index = CC_US;
 else if (country_code[0] == 'J' && country_code[1] == 'P')
     cc_index = CC_JP;
 else if (country_code[0] == 'K' && country_code[1] == 'R') {
-    // 한국의 특별 처리 - USN1과 USN5 대역 분리
+    // Special handling for Korea - USN1 and USN5 band separation
     if (kr_band == 1) {
-        cc_index = CC_K1;  // USN1: LBT 요구사항
+        cc_index = CC_K1;  // USN1: LBT requirements
         country_code[1] = '1';
     } else {
-        cc_index = CC_K2;  // USN5: MIC 검출 요구사항
+        cc_index = CC_K2;  // USN5: MIC detection requirements
         country_code[1] = '2';
     }
 }
 else if (country_match(eu_countries_cc, country_code)) {
-    // 27개 EU 회원국을 통합 EU 규제 도메인으로 매핑
+    // Map 27 EU member countries to unified EU regulatory domain
     cc_index = CC_EU;
     country_code[0] = 'E';
     country_code[1] = 'U';
 }
 ```
 
-### C. EU 규제 통합
+### C. EU Regulatory Unification
 ```c
-// nrc-init.c:632-636 - EU 27개국 통합 관리
+// nrc-init.c:632-636 - Unified management of 27 EU countries
 const char *const eu_countries_cc[] = {
     "AT", "BE", "BG", "CY", "CZ", "DE", "DK", "EE", "ES", "FI",
     "FR", "GR", "HR", "HU", "IE", "IT", "LT", "LU", "LV", "MT", 
     "NL", "PL", "PT", "RO", "SE", "SI", "SK", NULL
 };
 
-// 모든 EU 국가는 통합된 규제 도메인 사용
-// ETSI EN 300 220 표준 준수 (SRD 대역 863-870MHz)
+// All EU countries use unified regulatory domain
+// ETSI EN 300 220 standard compliance (SRD band 863-870MHz)
 ```
 
-### D. 동적 국가 전환
+### D. Dynamic Country Switching
 ```c
-// nrc-s1g.c - 런타임 국가 전환 지원
+// nrc-s1g.c - Runtime country switching support
 void nrc_set_s1g_country(char* country_code)
 {
     uint8_t cc_index = nrc_get_current_ccid_by_country(country_code);
     
-    // 유효하지 않은 국가 코드의 경우 미국을 기본값으로 설정
+    // Set US as default for invalid country codes
     if (cc_index >= MAX_COUNTRY_CODE) {
         cc_index = US;
         s1g_alpha2[0] = 'U';
@@ -76,41 +76,41 @@ void nrc_set_s1g_country(char* country_code)
         nrc_dbg(NRC_DBG_MAC, "Country index %d out of range. Setting default (US)!", cc_index);
     }
     
-    // S1G 채널 테이블 포인터 업데이트
+    // Update S1G channel table pointer
     ptr_nrc_s1g_ch_table = &s1g_ch_table_set[cc_index][0];
 }
 ```
 
-## 2. 보드 데이터 (BD) 시스템
+## 2. Board Data (BD) System
 
-### A. 보드 데이터 파일 구조
+### A. Board Data File Structure
 ```c
-// nrc-bd.h에 정의된 BDF 구조
+// BDF structure defined in nrc-bd.h
 struct BDF {
-    uint8_t  ver_major;        // 주요 버전 번호
-    uint8_t  ver_minor;        // 부 버전 번호
-    uint16_t total_len;        // 전체 데이터 길이
-    uint16_t num_data_groups;  // 국가별 데이터 그룹 수
-    uint16_t reserved[4];      // 예약 필드
-    uint16_t checksum_data;    // 데이터 무결성 체크섬
-    uint8_t data[0];           // 가변 길이 국가별 데이터
+    uint8_t  ver_major;        // Major version number
+    uint8_t  ver_minor;        // Minor version number
+    uint16_t total_len;        // Total data length
+    uint16_t num_data_groups;  // Number of country-specific data groups
+    uint16_t reserved[4];      // Reserved fields
+    uint16_t checksum_data;    // Data integrity checksum
+    uint8_t data[0];           // Variable-length country-specific data
 };
 
 struct wim_bd_param {
-    uint16_t type;             // 국가 코드 인덱스
-    uint16_t length;           // 데이터 길이
-    uint16_t checksum;         // 섹션 체크섬
-    uint16_t hw_version;       // 하드웨어 버전 호환성
-    uint8_t value[WIM_MAX_BD_DATA_LEN]; // 전력 제한 및 교정 데이터
+    uint16_t type;             // Country code index
+    uint16_t length;           // Data length
+    uint16_t checksum;         // Section checksum
+    uint16_t hw_version;       // Hardware version compatibility
+    uint8_t value[WIM_MAX_BD_DATA_LEN]; // Power limits and calibration data
 };
 ```
 
-### B. 하드웨어 버전 매칭
+### B. Hardware Version Matching
 ```c
-// nrc-bd.c:483-523 - 하드웨어 호환성 검사
+// nrc-bd.c:483-523 - Hardware compatibility check
 target_version = nw->fwinfo.hw_version;
 
-// 하드웨어 버전이 유효하지 않으면 0으로 설정
+// Set to 0 if hardware version is invalid
 if (target_version > 0x7FF)
     target_version = 0;
 
@@ -120,10 +120,10 @@ for (i = 0; i < bd->num_data_groups; i++) {
                 (bd->data[7 + len + 4*i]<<8));
         
         if (target_version == bd_sel->hw_version) {
-            // 일치하는 하드웨어 버전 데이터 로드
+            // Load matching hardware version data
             nrc_dbg(NRC_DBG_STATE, "target version matched(%u : %u)",
                     target_version, bd_sel->hw_version);
-            // 전력 제한 및 채널 데이터 로드
+            // Load power limits and channel data
             check_bd_flag = true;
             break;
         }
@@ -131,9 +131,9 @@ for (i = 0; i < bd->num_data_groups; i++) {
 }
 ```
 
-### C. 데이터 무결성 검증
+### C. Data Integrity Verification
 ```c
-// 16비트 체크섬 검증 알고리즘
+// 16-bit checksum verification algorithm
 static uint16_t nrc_checksum_16(uint16_t len, uint8_t* buf)
 {
     uint32_t checksum = 0;
@@ -148,19 +148,19 @@ static uint16_t nrc_checksum_16(uint16_t len, uint8_t* buf)
     return checksum;
 }
 
-// 보드 데이터 파일 검증
+// Board data file verification
 int nrc_check_bd(struct nrc *nw)
 {
     struct BDF *bd = (struct BDF *)g_bd;
     uint16_t ret;
     
-    // 파일 크기 검증
+    // File size verification
     if(g_bd_size < NRC_BD_HEADER_LENGTH) {
         dev_err(nw->dev, "Invalid data size(%d)", g_bd_size);
         return -EINVAL;
     }
     
-    // 체크섬 검증
+    // Checksum verification
     ret = nrc_checksum_16(bd->total_len, (uint8_t *)&bd->data[0]);
     if(bd->checksum_data != ret) {
         dev_err(nw->dev, "Invalid checksum(%u : %u)", bd->checksum_data, ret);
@@ -171,108 +171,108 @@ int nrc_check_bd(struct nrc *nw)
 }
 ```
 
-## 3. 채널 및 전력 관리
+## 3. Channel and Power Management
 
-### A. 국가별 채널 계획
+### A. Country-specific Channel Plans
 
-#### 미국 (CC_US) - 가장 포괄적
+#### United States (CC_US) - Most Comprehensive
 ```c
-// 902.5-927.5MHz 대역에서 최대 채널 지원
+// Maximum channel support in 902.5-927.5MHz band
 static const struct s1g_channel_table s1g_ch_table_us[] = {
     //cc, freq,channel, bw, cca, oper,offset,pri_loc
     {"US", 9025, 1,  BW_1M, 1, 1,  5, 0},   // 902.5MHz → 2412MHz
     {"US", 9035, 3,  BW_1M, 1, 1, -5, 1},   // 903.5MHz → 2422MHz
     {"US", 9045, 5,  BW_1M, 2, 1,  5, 0},   // 904.5MHz → 2432MHz
-    // ... 최대 50개 이상 채널 지원
+    // ... Support for 50+ channels
     {"US", 9825, 165, BW_1M, 1, 1, -5, 1},  // 982.5MHz → 5825MHz
 };
 ```
 
-#### 한국 K1 (USN1 - LBT 요구)
+#### Korea K1 (USN1 - LBT Required)
 ```c
-// 921-923MHz 비표준 대역
+// 921-923MHz non-standard band
 static const struct s1g_channel_table s1g_ch_table_k1[] = {
     {"K1", 9215, 36, BW_1M, 1, 1,  5, 0},   // 921.5MHz
     {"K1", 9225, 37, BW_1M, 1, 1, -5, 1},   // 922.5MHz
-    // LBT (Listen Before Talk) 프로토콜 필수
+    // LBT (Listen Before Talk) protocol mandatory
 };
 ```
 
-#### 한국 K2 (USN5 - MIC 검출 요구)
+#### Korea K2 (USN5 - MIC Detection Required)
 ```c
-// 925-931MHz MIC 대역
+// 925-931MHz MIC band
 static const struct s1g_channel_table s1g_ch_table_k2[] = {
     {"K2", 9255, 36, BW_1M, 1, 1,  5, 0},   // 925.5MHz
     {"K2", 9265, 37, BW_1M, 1, 1, -5, 1},   // 926.5MHz
     {"K2", 9275, 38, BW_1M, 2, 1,  5, 0},   // 927.5MHz
-    // ... 925.5-930.5MHz 범위
+    // ... 925.5-930.5MHz range
     {"K2", 9270, 42, BW_2M, 1, 1,  0, 0},   // 927.0MHz (2MHz)
     {"K2", 9290, 43, BW_2M, 1, 1,  0, 0},   // 929.0MHz (2MHz)
-    // MIC (Mutual Interference Cancellation) 검출 필수
+    // MIC (Mutual Interference Cancellation) detection mandatory
 };
 ```
 
-#### 유럽연합 (CC_EU) - SRD 대역
+#### European Union (CC_EU) - SRD Band
 ```c
-// 863.5-867.5MHz SRD 대역 (Short Range Device)
+// 863.5-867.5MHz SRD band (Short Range Device)
 static const struct s1g_channel_table s1g_ch_table_eu[] = {
     {"EU", 8635, 1, BW_1M, 1, 6,  5, 0},    // 863.5MHz
     {"EU", 8645, 3, BW_1M, 1, 6, -5, 1},    // 864.5MHz
     {"EU", 8655, 5, BW_1M, 1, 6,  5, 0},    // 865.5MHz
     {"EU", 8665, 7, BW_1M, 1, 6, -5, 1},    // 866.5MHz
     {"EU", 8675, 9, BW_1M, 1, 6, -5, 1},    // 867.5MHz
-    // ETSI EN 300 220 표준 준수
+    // ETSI EN 300 220 standard compliance
 };
 ```
 
-#### 일본 (CC_JP) - 제한적 할당
+#### Japan (CC_JP) - Limited Allocation
 ```c
-// 917-927MHz 제한된 주파수 범위
+// 917-927MHz limited frequency range
 static const struct s1g_channel_table s1g_ch_table_jp[] = {
     {"JP", 9170, 1,  BW_1M, 1, 8,  5, 0},   // 917.0MHz
     {"JP", 9180, 3,  BW_1M, 1, 8, -5, 1},   // 918.0MHz
     {"JP", 9190, 5,  BW_1M, 2, 8,  5, 0},   // 919.0MHz
-    // ... 제한된 채널 할당
-    // MIC (Ministry of Internal Affairs and Communications) 규제 준수
+    // ... Limited channel allocation
+    // MIC (Ministry of Internal Affairs and Communications) regulation compliance
 };
 ```
 
-### B. S1G 주파수 매핑
+### B. S1G Frequency Mapping
 ```c
-// S1G 주파수를 기존 WiFi 채널에 매핑
-// 기존 WiFi 도구와의 호환성 보장
+// Map S1G frequencies to existing WiFi channels
+// Ensure compatibility with existing WiFi tools
 struct s1g_channel_table {
-    char cc[3];           // 국가 코드
-    int s1g_freq;         // 실제 S1G 주파수 (단위: 0.1MHz)
-    int non_s1g_ch;       // 매핑된 WiFi 채널 번호
-    int bw;               // 대역폭 (1, 2, 4, 8, 16MHz)
-    int cca;              // Clear Channel Assessment 타입
-    int oper;             // 동작 클래스
-    int offset;           // 주파수 오프셋
-    int pri_loc;          // Primary 채널 위치
+    char cc[3];           // Country code
+    int s1g_freq;         // Actual S1G frequency (unit: 0.1MHz)
+    int non_s1g_ch;       // Mapped WiFi channel number
+    int bw;               // Bandwidth (1, 2, 4, 8, 16MHz)
+    int cca;              // Clear Channel Assessment type
+    int oper;             // Operating class
+    int offset;           // Frequency offset
+    int pri_loc;          // Primary channel location
 };
 
-예시:
-9025 (902.5MHz) → 2412MHz (WiFi 채널 1)
-9035 (903.5MHz) → 2422MHz (WiFi 채널 3)
+Example:
+9025 (902.5MHz) → 2412MHz (WiFi channel 1)
+9035 (903.5MHz) → 2422MHz (WiFi channel 3)
 ```
 
-### C. 전력 제한 시행
+### C. Power Limit Enforcement
 ```c
-// WIM 프로토콜을 통한 전력 제한 적용
+// Apply power limits through WIM protocol
 enum WIM_TXPWR_TYPE {
-    TXPWR_AUTO = 0,   // 자동 전력 제어
-    TXPWR_LIMIT,      // 규제 제한 적용
-    TXPWR_FIXED,      // 고정 전력 모드
+    TXPWR_AUTO = 0,   // Automatic power control
+    TXPWR_LIMIT,      // Apply regulatory limits
+    TXPWR_FIXED,      // Fixed power mode
 };
 
-// 국가별 최대 전력 제한 적용
+// Apply country-specific maximum power limits
 int nrc_wim_set_txpower(struct nrc *nw, int power_dbm)
 {
     struct sk_buff *skb;
     int max_power = get_country_max_power(nw->country_code);
     
-    // 규제 제한 확인
+    // Check regulatory limits
     if (power_dbm > max_power) {
         power_dbm = max_power;
         nrc_dbg(NRC_DBG_WIM, "Power limited to %d dBm", max_power);
@@ -285,40 +285,40 @@ int nrc_wim_set_txpower(struct nrc *nw, int power_dbm)
 }
 ```
 
-## 4. 특수 지역 요구사항
+## 4. Special Regional Requirements
 
-### A. 한국의 LBT (Listen Before Talk) 구현
+### A. Korea's LBT (Listen Before Talk) Implementation
 ```c
-// USN1 대역 (921-923MHz)에서 LBT 프로토콜 필수
+// LBT protocol mandatory in USN1 band (921-923MHz)
 case WIM_EVENT_LBT_ENABLED:
     nrc_dbg(NRC_DBG_HIF, "LBT enabled for USN1 band");
-    // 송신 전 캐리어 센싱 활성화
+    // Enable carrier sensing before transmission
     break;
     
 case WIM_EVENT_LBT_DISABLED:
     nrc_dbg(NRC_DBG_HIF, "LBT disabled");
     break;
 
-// LBT 요구사항 (한국 USN1):
-// 1. 송신 전 캐리어 센싱 필수
-// 2. 채널 점유 상태 확인
-// 3. 동적 채널 접근 관리
-// 4. 백오프 알고리즘 구현
+// LBT Requirements (Korea USN1):
+// 1. Carrier sensing mandatory before transmission
+// 2. Channel occupancy status verification
+// 3. Dynamic channel access management
+// 4. Backoff algorithm implementation
 ```
 
-### B. 한국의 MIC 검출 구현
+### B. Korea's MIC Detection Implementation
 ```c
-// USN5 대역 (925-931MHz)에서 MIC 검출 필수
+// MIC detection mandatory in USN5 band (925-931MHz)
 static int nrc_mic_scan(struct sk_buff *skb, struct genl_info *info)
 {
     struct wim_channel_1m_param channel;
     struct sk_buff *wim_skb;
     
-    // 스캔 채널 범위 설정
+    // Set scan channel range
     channel.channel_start = nla_get_s32(info->attrs[NL_MIC_SCAN_CHANNEL_START]);
     channel.channel_end = nla_get_s32(info->attrs[NL_MIC_SCAN_CHANNEL_END]);
     
-    // MIC 스캔 명령 생성
+    // Generate MIC scan command
     wim_skb = nrc_wim_alloc_skb(nrc_nw, WIM_CMD_MIC_SCAN,
                                sizeof(struct wim_channel_1m_param));
     if (!wim_skb) {
@@ -326,61 +326,61 @@ static int nrc_mic_scan(struct sk_buff *skb, struct genl_info *info)
         return -ENOMEM;
     }
     
-    // MIC 검출 실행
+    // Execute MIC detection
     return nrc_wim_send_request(nrc_nw, wim_skb);
 }
 
-// MIC 검출 요구사항 (한국 USN5):
-// 1. 지속적인 스펙트럼 모니터링
-// 2. 간섭 검출 및 완화
-// 3. 동적 채널 품질 평가
-// 4. 실시간 신호 분석
+// MIC Detection Requirements (Korea USN5):
+// 1. Continuous spectrum monitoring
+// 2. Interference detection and mitigation
+// 3. Dynamic channel quality assessment
+// 4. Real-time signal analysis
 ```
 
-### C. 일본의 특수 규제
+### C. Japan's Special Regulations
 ```c
-// 일본 MIC (총무성) 규제 준수
-// 917-927MHz 제한된 주파수 할당
+// Japan MIC (Ministry of Internal Affairs and Communications) regulation compliance
+// 917-927MHz limited frequency allocation
 static const struct regulatory_rules jp_rules = {
-    .max_power_dbm = 10,        // 최대 10dBm
-    .max_antenna_gain = 6,      // 최대 안테나 이득 6dBi
-    .duty_cycle_limit = 10,     // 10% 듀티 사이클 제한
-    .listen_before_talk = false, // LBT 불필요
-    .frequency_hopping = false,  // 주파수 호핑 불필요
+    .max_power_dbm = 10,        // Maximum 10dBm
+    .max_antenna_gain = 6,      // Maximum antenna gain 6dBi
+    .duty_cycle_limit = 10,     // 10% duty cycle limit
+    .listen_before_talk = false, // LBT not required
+    .frequency_hopping = false,  // Frequency hopping not required
 };
 ```
 
-### D. EU SRD 규제 준수
+### D. EU SRD Regulation Compliance
 ```c
-// ETSI EN 300 220 표준 준수 (863-870MHz SRD 대역)
+// ETSI EN 300 220 standard compliance (863-870MHz SRD band)
 static const struct regulatory_rules eu_rules = {
-    .max_power_dbm = 14,        // 최대 14dBm (25mW)
-    .max_antenna_gain = 0,      // 안테나 이득 포함된 EIRP
-    .duty_cycle_limit = 100,    // 제한 없음 (일부 채널)
-    .listen_before_talk = false, // 일반적으로 불필요
-    .adaptive_frequency_agility = false, // AFA 불필요
+    .max_power_dbm = 14,        // Maximum 14dBm (25mW)
+    .max_antenna_gain = 0,      // EIRP including antenna gain
+    .duty_cycle_limit = 100,    // No limit (some channels)
+    .listen_before_talk = false, // Generally not required
+    .adaptive_frequency_agility = false, // AFA not required
 };
 ```
 
-### E. 미국 FCC 요구사항
+### E. US FCC Requirements
 ```c
-// FCC Part 15.247 규제 준수 (902-928MHz ISM 대역)
+// FCC Part 15.247 regulation compliance (902-928MHz ISM band)
 static const struct regulatory_rules us_rules = {
-    .max_power_dbm = 30,        // 최대 30dBm (1W)
-    .max_antenna_gain = 6,      // 최대 안테나 이득 6dBi
-    .spread_spectrum = true,    // 대역 확산 필수
-    .frequency_hopping = false, // 주파수 호핑 선택적
+    .max_power_dbm = 30,        // Maximum 30dBm (1W)
+    .max_antenna_gain = 6,      // Maximum antenna gain 6dBi
+    .spread_spectrum = true,    // Spread spectrum mandatory
+    .frequency_hopping = false, // Frequency hopping optional
     .power_spectral_density = -8, // -8 dBm/3kHz
 };
 ```
 
-## 5. 런타임 준수 관리
+## 5. Runtime Compliance Management
 
-### A. 실시간 준수 검증
+### A. Real-time Compliance Verification
 ```c
-// 지원 채널 목록 관리
-struct bd_supp_param g_supp_ch_list;  // 국가별 지원 채널 목록
-bool g_bd_valid = false;              // 보드 데이터 유효성 플래그
+// Supported channel list management
+struct bd_supp_param g_supp_ch_list;  // Country-specific supported channel list
+bool g_bd_valid = false;              // Board data validity flag
 
 bool nrc_set_supp_ch_list(struct wim_bd_param *bd)
 {
@@ -389,13 +389,13 @@ bool nrc_set_supp_ch_list(struct wim_bd_param *bd)
     int i, j = 0;
     uint8_t cc_idx, s1g_ch_idx;
     
-    // 현재 국가의 지원 채널 설정
+    // Set supported channels for current country
     for(i=0; i < NRC_BD_MAX_CH_LIST; i++) {
         if((*pos) && (length > 0)) {
             g_supp_ch_list.num_ch++;
             g_supp_ch_list.s1g_ch_index[i] = *pos;
             
-            // S1G를 non-S1G 주파수로 매핑
+            // Map S1G to non-S1G frequency
             cc_idx = nrc_get_cc_by_country();
             s1g_ch_idx = *pos;
             g_supp_ch_list.nons1g_ch_freq[j] = 
@@ -412,21 +412,21 @@ bool nrc_set_supp_ch_list(struct wim_bd_param *bd)
 }
 ```
 
-### B. 채널 설정 검증
+### B. Channel Setting Verification
 ```c
-// 채널 설정 시 규제 준수 확인
+// Verify regulatory compliance when setting channels
 int nrc_set_channel(struct nrc *nw, int channel)
 {
     bool channel_allowed = false;
     int i;
     
-    // 보드 데이터 유효성 확인
+    // Check board data validity
     if (!g_bd_valid) {
         nrc_dbg(NRC_DBG_MAC, "Board data not valid");
         return -EINVAL;
     }
     
-    // 요청된 채널이 허용된 채널인지 확인
+    // Check if requested channel is allowed
     for (i = 0; i < g_supp_ch_list.num_ch; i++) {
         if (g_supp_ch_list.s1g_ch_index[i] == channel) {
             channel_allowed = true;
@@ -440,19 +440,19 @@ int nrc_set_channel(struct nrc *nw, int channel)
         return -EINVAL;
     }
     
-    // WIM 명령으로 채널 설정
+    // Set channel via WIM command
     return nrc_wim_set_channel(nw, channel);
 }
 ```
 
-### C. 전력 제한 시행
+### C. Power Limit Enforcement
 ```c
-// 전력 설정 시 국가별 제한 적용
+// Apply country-specific limits when setting power
 int nrc_set_txpower(struct nrc *nw, int power_dbm)
 {
     int max_power = 0;
     
-    // 국가별 최대 전력 제한 확인
+    // Check country-specific maximum power limits
     switch (nw->country_index) {
         case CC_US:
             max_power = 30;  // 30dBm (1W)
@@ -468,11 +468,11 @@ int nrc_set_txpower(struct nrc *nw, int power_dbm)
             max_power = 23;  // 23dBm (200mW)
             break;
         default:
-            max_power = 20;  // 기본값 20dBm
+            max_power = 20;  // Default 20dBm
             break;
     }
     
-    // 전력 제한 적용
+    // Apply power limits
     if (power_dbm > max_power) {
         nrc_dbg(NRC_DBG_MAC, "Power limited from %d to %d dBm", 
                 power_dbm, max_power);
@@ -483,9 +483,9 @@ int nrc_set_txpower(struct nrc *nw, int power_dbm)
 }
 ```
 
-### D. 규제 위반 에러 처리
+### D. Regulatory Violation Error Handling
 ```c
-// 규제 위반 시 에러 처리 및 복구
+// Error handling and recovery for regulatory violations
 enum regulatory_error_codes {
     REG_ERROR_INVALID_COUNTRY = -1001,
     REG_ERROR_INVALID_CHANNEL = -1002,
@@ -498,25 +498,25 @@ static void handle_regulatory_error(struct nrc *nw, int error_code)
 {
     switch (error_code) {
         case REG_ERROR_INVALID_COUNTRY:
-            // 기본 국가 코드로 복구
+            // Revert to default country code
             nrc_set_s1g_country("US");
             dev_warn(nw->dev, "Invalid country, reverted to US");
             break;
             
         case REG_ERROR_INVALID_CHANNEL:
-            // 기본 채널로 전환
+            // Switch to default channel
             nrc_set_channel(nw, 1);
             dev_warn(nw->dev, "Invalid channel, reverted to channel 1");
             break;
             
         case REG_ERROR_POWER_EXCEEDED:
-            // 최대 허용 전력으로 제한
+            // Limit to maximum allowed power
             nrc_set_txpower(nw, get_max_power(nw->country_code));
             dev_warn(nw->dev, "Power exceeded, limited to maximum allowed");
             break;
             
         case REG_ERROR_BD_CHECKSUM:
-            // 보드 데이터 무효화
+            // Invalidate board data
             g_bd_valid = false;
             dev_err(nw->dev, "Board data checksum error, disabling");
             break;
@@ -524,119 +524,119 @@ static void handle_regulatory_error(struct nrc *nw, int error_code)
 }
 ```
 
-## 6. 설정 파일 및 배포
+## 6. Configuration Files and Deployment
 
-### A. 국가별 설정 파일 구조
+### A. Country-specific Configuration File Structure
 ```bash
-# evk/sw_pkg/nrc_pkg/script/conf/ 디렉토리 구조
+# evk/sw_pkg/nrc_pkg/script/conf/ directory structure
 conf/
-├── US/          # 미국 설정
+├── US/          # United States configuration
 │   ├── ap_halow_open.conf
 │   ├── sta_halow_open.conf
 │   └── mp_halow_open.conf
-├── EU/          # 유럽연합 설정
-├── JP/          # 일본 설정
-├── K1/          # 한국 USN1 설정
-├── K2/          # 한국 USN5 설정
-├── TW/          # 대만 설정
-├── CN/          # 중국 설정
-├── NZ/          # 뉴질랜드 설정
-└── AU/          # 호주 설정
+├── EU/          # European Union configuration
+├── JP/          # Japan configuration
+├── K1/          # Korea USN1 configuration
+├── K2/          # Korea USN5 configuration
+├── TW/          # Taiwan configuration
+├── CN/          # China configuration
+├── NZ/          # New Zealand configuration
+└── AU/          # Australia configuration
 ```
 
-### B. 자동 국가 감지 및 설정
+### B. Automatic Country Detection and Configuration
 ```python
-# start.py에서 국가 자동 감지
+# Automatic country detection in start.py
 def auto_detect_country():
     """
-    시스템 로케일 또는 GPS 정보를 통한 국가 자동 감지
+    Automatic country detection via system locale or GPS information
     """
     try:
-        # 시스템 로케일 확인
+        # Check system locale
         locale_country = get_system_locale_country()
         
-        # GPS 기반 위치 확인 (선택적)
+        # GPS-based location check (optional)
         if has_gps_capability():
             gps_country = get_gps_country()
             if gps_country:
                 return gps_country
                 
-        return locale_country or "US"  # 기본값: 미국
+        return locale_country or "US"  # Default: United States
     except:
-        return "US"  # 오류 시 미국으로 기본 설정
+        return "US"  # Default to US on error
 ```
 
-### C. 규제 준수 검증 스크립트
+### C. Regulatory Compliance Verification Script
 ```python
-# regulatory_check.py - 배포 전 규제 준수 검증
+# regulatory_check.py - Pre-deployment regulatory compliance verification
 def validate_regulatory_compliance(country_code, config_file):
     """
-    배포 전 규제 준수 상태 검증
+    Verify regulatory compliance status before deployment
     """
     rules = load_regulatory_rules(country_code)
     config = load_config(config_file)
     
     errors = []
     
-    # 주파수 검증
+    # Frequency verification
     if not is_frequency_allowed(config['frequency'], rules):
         errors.append(f"Frequency {config['frequency']} not allowed in {country_code}")
     
-    # 전력 검증
+    # Power verification
     if config['txpower'] > rules['max_power']:
         errors.append(f"TX power {config['txpower']} exceeds limit {rules['max_power']}")
     
-    # 대역폭 검증
+    # Bandwidth verification
     if not is_bandwidth_allowed(config['bandwidth'], rules):
         errors.append(f"Bandwidth {config['bandwidth']} not allowed")
     
     return errors
 ```
 
-## 7. 주요 파일 위치
+## 7. Key File Locations
 
-### A. 규제 핵심 파일들
+### A. Regulatory Core Files
 ```bash
-# 드라이버 코어 파일
-package/src/nrc/nrc-bd.c/h         # 보드 데이터 관리
-package/src/nrc/nrc-s1g.c/h        # S1G 채널 관리
-package/src/nrc/nrc-init.c         # 국가 코드 검증
-package/src/nrc/nrc-netlink.c      # MIC 스캔 인터페이스
+# Driver core files
+package/src/nrc/nrc-bd.c/h         # Board data management
+package/src/nrc/nrc-s1g.c/h        # S1G channel management
+package/src/nrc/nrc-init.c         # Country code validation
+package/src/nrc/nrc-netlink.c      # MIC scan interface
 
-# 설정 파일들
-evk/sw_pkg/nrc_pkg/script/conf/*/  # 국가별 설정
-evk/binary/nrc7292_bd.dat          # 바이너리 보드 데이터
+# Configuration files
+evk/sw_pkg/nrc_pkg/script/conf/*/  # Country-specific configurations
+evk/binary/nrc7292_bd.dat          # Binary board data
 ```
 
-### B. 런타임 설정 도구
+### B. Runtime Configuration Tools
 ```bash
-# 국가 설정 변경
-./start.py 0 0 US              # 미국 규제로 STA 모드 시작
-./start.py 1 1 EU              # EU 규제로 AP 모드 시작
-./start.py 2 0 JP 1 0          # 일본 규제로 스니퍼 모드
+# Country configuration changes
+./start.py 0 0 US              # Start STA mode with US regulations
+./start.py 1 1 EU              # Start AP mode with EU regulations
+./start.py 2 0 JP 1 0          # Start sniffer mode with Japan regulations
 
-# 수동 채널/전력 설정
-iw dev wlan0 set freq 902500   # 902.5MHz로 설정
-iw dev wlan0 set txpower fixed 2000  # 20dBm으로 설정
+# Manual channel/power settings
+iw dev wlan0 set freq 902500   # Set to 902.5MHz
+iw dev wlan0 set txpower fixed 2000  # Set to 20dBm
 ```
 
-## 8. 결론
+## 8. Conclusion
 
-NRC7292 HaLow 드라이버의 규제 준수 시스템은 다음과 같은 특징을 제공합니다:
+The NRC7292 HaLow driver's regulatory compliance system provides the following features:
 
-### A. 포괄적 글로벌 지원
-- **9개 주요 국가/지역** 규제 도메인 지원
-- **하드웨어 검증된 보드 데이터**로 지역별 정확한 교정
-- **동적 국가 전환** 지원으로 국제 기기 배포 가능
+### A. Comprehensive Global Support
+- **9 major country/region** regulatory domain support
+- **Hardware-validated board data** for accurate regional calibration
+- **Dynamic country switching** support enabling international device deployment
 
-### B. 견고한 준수 메커니즘
-- **실시간 규제 검증** 및 체크섬 확인
-- **특수 지역 요구사항** (한국 LBT/MIC, 일본 제한사항)
-- **자동 에러 처리** 및 복구 시스템
+### B. Robust Compliance Mechanisms
+- **Real-time regulatory verification** and checksum validation
+- **Special regional requirements** (Korea LBT/MIC, Japan restrictions)
+- **Automatic error handling** and recovery system
 
-### C. 표준 준수
-- **FCC** (미국), **IC** (캐나다), **ETSI** (EU)
-- **MIC** (일본), **KCC** (한국) 등 주요 규제 기관
-- **IEEE 802.11ah** 표준 완전 준수
+### C. Standards Compliance
+- **FCC** (US), **IC** (Canada), **ETSI** (EU)
+- **MIC** (Japan), **KCC** (Korea) and other major regulatory authorities
+- **IEEE 802.11ah** standard full compliance
 
-이러한 포괄적인 규제 준수 프레임워크를 통해 NRC7292 HaLow 드라이버는 전 세계 어디서나 현지 무선 규제를 준수하면서 안정적으로 동작할 수 있습니다.
+Through this comprehensive regulatory compliance framework, the NRC7292 HaLow driver can operate reliably anywhere in the world while complying with local wireless regulations.

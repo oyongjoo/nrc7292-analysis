@@ -1,9 +1,9 @@
-# NRC7292 드라이버 데이터 흐름 분석
+# NRC7292 Driver Data Flow Analysis
 
-## 전체 데이터 흐름 아키텍처
+## Overall Data Flow Architecture
 
 ```
-사용자 공간                     커널 공간                        하드웨어
+User Space                    Kernel Space                      Hardware
 ┌─────────────┐              ┌──────────────────────────┐        ┌─────────────┐
 │ CLI App     │              │                          │        │             │
 │ start.py    │◄────────────►│    nrc-netlink.c/.h     │        │   NRC7292   │
@@ -13,230 +13,230 @@
 ┌─────────────┐              ┌──────────▼───────────────┐        │             │
 │ hostapd/    │              │                          │        │             │
 │ wpa_        │◄────────────►│    nrc-mac80211.c/.h    │        │             │
-│ supplicant  │              │  (ieee80211_ops 구현)   │        │             │
+│ supplicant  │              │  (ieee80211_ops impl)   │        │             │
 └─────────────┘              └──────────┬───────────────┘        │             │
                                         │                        │             │
                              ┌──────────▼───────────────┐        │             │
                              │      nrc-trx.c           │        │             │
-                             │  (TX/RX 패킷 처리)      │        │             │
+                             │  (TX/RX packet handling) │        │             │
                              └──────────┬───────────────┘        │             │
                                         │                        │             │
                              ┌──────────▼───────────────┐        │             │
                              │       wim.c/.h           │        │             │
-                             │ (WIM 프로토콜 레이어)    │        │             │
+                             │ (WIM protocol layer)     │        │             │
                              └──────────┬───────────────┘        │             │
                                         │                        │             │
                              ┌──────────▼───────────────┐        │             │
                              │   nrc-hif-cspi.c/.h     │◄──────►│             │
-                             │  (CSPI 하드웨어 IF)     │        │             │
+                             │  (CSPI hardware IF)      │        │             │
                              └──────────────────────────┘        └─────────────┘
 ```
 
-## 송신 데이터 경로 (TX Path)
+## Transmit Data Path (TX Path)
 
-### 1. 패킷 진입점
+### 1. Packet Entry Point
 ```c
-// mac80211에서 패킷 전송 요청 (실제 함수명)
+// Packet transmission request from mac80211 (actual function name)
 static void nrc_mac_tx(struct ieee80211_hw *hw, 
                       struct ieee80211_tx_control *control,
                       struct sk_buff *skb)
 {
-    // 패킷 검증 및 전처리
-    // 큐 선택 및 우선순위 처리
-    // HIF 레이어로 전달
+    // Packet validation and preprocessing
+    // Queue selection and priority handling
+    // Forward to HIF layer
 }
 ```
 
-### 2. TX 처리 파이프라인
+### 2. TX Processing Pipeline
 ```
-네트워크 스택 패킷
+Network stack packet
        ↓
 nrc_mac_tx() [nrc-trx.c]
        ↓
 nrc_xmit_frame() [hif.c]
        ↓ 
-패킷 헤더 추가/변환
+Packet header addition/conversion
        ↓
-AMPDU 집성 처리 (필요시)
+AMPDU aggregation (if needed)
        ↓
 nrc_xmit_wim() [wim.c/hif.c]
        ↓
-WIM 프로토콜 래핑
+WIM protocol wrapping
        ↓
 HIF ops->xmit() [nrc-hif-cspi.c]
        ↓
-SPI 전송
+SPI transmission
        ↓
-NRC7292 하드웨어
+NRC7292 hardware
 ```
 
-### 3. TX 상세 처리 단계
+### 3. TX Detailed Processing Steps
 
-#### A. TX 진입점 처리 (nrc-trx.c)
+#### A. TX Entry Point Processing (nrc-trx.c)
 ```c
-// nrc_mac_tx() 함수에서 처리되는 단계들:
-1. ieee80211_tx_info 검증
-2. 대상 VIF 및 스테이션 확인
-3. 암호화 키 설정
-4. QoS 및 우선순위 처리
-5. TX tasklet 스케줄링 또는 직접 전송
+// Steps handled in nrc_mac_tx() function:
+1. ieee80211_tx_info validation
+2. Target VIF and station verification
+3. Encryption key setup
+4. QoS and priority handling
+5. TX tasklet scheduling or direct transmission
 ```
 
-#### B. HIF 레이어 처리 (hif.c)
+#### B. HIF Layer Processing (hif.c)
 ```c
-// nrc_xmit_frame() 함수에서 처리되는 단계들:
-1. HIF 헤더 추가
-2. VIF 인덱스 및 AID 설정
-3. 패킷 세그멘테이션 (필요시)
-4. AMPDU 집성 판단
-5. WIM 레이어로 전달
+// Steps handled in nrc_xmit_frame() function:
+1. HIF header addition
+2. VIF index and AID setup
+3. Packet segmentation (if needed)
+4. AMPDU aggregation decision
+5. Forward to WIM layer
 ```
 
-#### C. WIM 프로토콜 처리 (wim.c/hif.c)
+#### C. WIM Protocol Processing (wim.c/hif.c)
 ```c
-// nrc_xmit_wim() 함수에서 처리되는 단계들:
-1. WIM 헤더 생성
-2. HIF_SUBTYPE 설정 (DATA, MGMT, etc.)
-3. 시퀀스 번호 할당
-4. TLV 포맷 변환
-5. HIF 레이어로 전달
+// Steps handled in nrc_xmit_wim() function:
+1. WIM header generation
+2. HIF_SUBTYPE setup (DATA, MGMT, etc.)
+3. Sequence number assignment
+4. TLV format conversion
+5. Forward to HIF layer
 ```
 
-#### D. CSPI 하드웨어 인터페이스 (nrc-hif-cspi.c)
+#### D. CSPI Hardware Interface (nrc-hif-cspi.c)
 ```c
-// HIF ops->xmit() 구현에서 처리되는 단계들:
-1. DMA 버퍼 할당
-2. CSPI 프로토콜 헤더 추가
-3. SPI 전송 큐잉
-4. 인터럽트 기반 전송
-5. 전송 완료 확인
+// Steps handled in HIF ops->xmit() implementation:
+1. DMA buffer allocation
+2. CSPI protocol header addition
+3. SPI transmission queuing
+4. Interrupt-based transmission
+5. Transmission completion confirmation
 ```
 
-## 수신 데이터 경로 (RX Path)
+## Receive Data Path (RX Path)
 
-### 1. 인터럽트 처리
+### 1. Interrupt Processing
 ```c
-// CSPI 인터럽트 핸들러 (실제 구현)
+// CSPI interrupt handler (actual implementation)
 static irqreturn_t nrc_hif_cspi_irq_handler(int irq, void *dev_id)
 {
-    // 인터럽트 소스 확인
-    // RX 데이터 유무 체크
-    // Tasklet 또는 Work queue 스케줄링
+    // Check interrupt source
+    // Check for RX data availability
+    // Schedule tasklet or work queue
     return IRQ_HANDLED;
 }
 ```
 
-### 2. RX 처리 파이프라인
+### 2. RX Processing Pipeline
 ```
-NRC7292 하드웨어
+NRC7292 hardware
        ↓
-인터럽트 발생
+Interrupt occurs
        ↓
 nrc_hif_cspi_irq_handler() [nrc-hif-cspi.c]
        ↓
-HIF ops->read() - SPI 읽기
+HIF ops->read() - SPI read
        ↓
 nrc_hif_rx() [hif.c]
        ↓
-WIM 프로토콜 파싱
+WIM protocol parsing
        ↓
 nrc_rx_complete() [nrc-trx.c]
        ↓
-패킷 검증 및 변환
+Packet validation and conversion
        ↓
 ieee80211_rx_ni() [mac80211]
        ↓
-네트워크 스택으로 전달
+Forward to network stack
 ```
 
-### 3. RX 상세 처리 단계
+### 3. RX Detailed Processing Steps
 
-#### A. HIF 인터럽트 처리 (nrc-hif-cspi.c)
+#### A. HIF Interrupt Processing (nrc-hif-cspi.c)
 ```c
-1. GPIO 인터럽트 감지
-2. 인터럽트 상태 레지스터 읽기
-3. RX FIFO 상태 확인
-4. Work queue 스케줄링
-5. 인터럽트 클리어
+1. GPIO interrupt detection
+2. Interrupt status register read
+3. RX FIFO status check
+4. Work queue scheduling
+5. Interrupt clear
 ```
 
-#### B. WIM 프로토콜 파싱 (wim.c)
+#### B. WIM Protocol Parsing (wim.c)
 ```c
-1. WIM 헤더 검증
-2. 메시지 타입 확인
-3. 페이로드 길이 검증
-4. 체크섬 확인
-5. 응답/이벤트 분류
+1. WIM header validation
+2. Message type verification
+3. Payload length validation
+4. Checksum verification
+5. Response/event classification
 ```
 
-#### C. TRX 레이어 처리 (nrc-trx.c)
+#### C. TRX Layer Processing (nrc-trx.c)
 ```c
-1. HIF 헤더 제거
-2. 패킷 리어셈블리 (세그멘테이션된 경우)
-3. AMPDU 리오더링
-4. 중복 패킷 필터링
-5. 통계 업데이트
+1. HIF header removal
+2. Packet reassembly (if segmented)
+3. AMPDU reordering
+4. Duplicate packet filtering
+5. Statistics update
 ```
 
-#### D. MAC 레이어 전달 (nrc-mac80211.c)
+#### D. MAC Layer Forwarding (nrc-mac80211.c)
 ```c
-1. ieee80211_rx_status 구성
-2. RSSI/SNR 정보 설정
-3. 채널 정보 매핑
-4. 암호화 상태 설정
-5. mac80211으로 전달
+1. ieee80211_rx_status construction
+2. RSSI/SNR information setup
+3. Channel information mapping
+4. Encryption status setup
+5. Forward to mac80211
 ```
 
-## 제어 명령 경로 (Control Path)
+## Control Command Path
 
-### 1. 사용자 공간에서 커널로 (Netlink)
+### 1. User Space to Kernel (Netlink)
 ```
-CLI App → netlink socket → nrc-netlink.c → 해당 처리 함수
+CLI App → netlink socket → nrc-netlink.c → corresponding handler function
 ```
 
-### 2. WIM 명령 처리 경로
+### 2. WIM Command Processing Path
 ```
-설정 요청
+Configuration request
     ↓
 nrc_wim_set_param()
     ↓  
-WIM_CMD_SET 메시지 생성
+WIM_CMD_SET message generation
     ↓
-cspi_write() 전송
+cspi_write() transmission
     ↓
-응답 대기 및 처리
+Response waiting and processing
 ```
 
-## AMPDU 집성 데이터 흐름
+## AMPDU Aggregation Data Flow
 
 ### TX AMPDU
 ```
-개별 패킷들 → 집성 버퍼 → Block ACK 설정 → 일괄 전송 → BA 응답 처리
+Individual packets → Aggregation buffer → Block ACK setup → Batch transmission → BA response handling
 ```
 
 ### RX AMPDU
 ```
-집성된 패킷 수신 → 리오더링 버퍼 → 순서 재배열 → 개별 패킷 전달 → BA 응답 전송
+Aggregated packet reception → Reordering buffer → Sequence rearrangement → Individual packet forwarding → BA response transmission
 ```
 
-## 전력 관리 데이터 흐름 
+## Power Management Data Flow 
 
-### 절전 모드 진입
+### Sleep Mode Entry
 ```
-유휴 상태 감지 → PM 결정 → WIM_CMD_SLEEP → 하드웨어 절전 → 인터럽트 대기
-```
-
-### 절전 모드 해제  
-```
-Wake-up 인터럽트 → cspi_resume() → WIM_CMD_WAKE → 정상 동작 복구
+Idle state detection → PM decision → WIM_CMD_SLEEP → Hardware sleep → Interrupt waiting
 ```
 
-## 성능 최적화 포인트
+### Sleep Mode Exit  
+```
+Wake-up interrupt → cspi_resume() → WIM_CMD_WAKE → Normal operation recovery
+```
 
-1. **Zero-copy 경로**: DMA 직접 전송으로 메모리 복사 최소화
-2. **인터럽트 집합**: 다중 패킷을 한 번의 인터럽트로 처리
-3. **큐 관리**: 우선순위별 TX 큐 분리 관리
-4. **배치 처리**: 작은 패킷들의 배치 전송
-5. **캐시 최적화**: 패킷 버퍼의 캐시 정렬
+## Performance Optimization Points
 
-이 데이터 흐름 구조는 NRC7292 HaLow 드라이버의 효율적인 패킷 처리와 저지연 통신을 보장합니다.
+1. **Zero-copy path**: Minimize memory copying with direct DMA transmission
+2. **Interrupt coalescing**: Handle multiple packets with single interrupt
+3. **Queue management**: Separate priority-based TX queue management
+4. **Batch processing**: Batch transmission of small packets
+5. **Cache optimization**: Cache-aligned packet buffer management
+
+This data flow structure ensures efficient packet processing and low-latency communication for the NRC7292 HaLow driver.

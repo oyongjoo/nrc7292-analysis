@@ -1,151 +1,151 @@
-# WIM 프로토콜 상세 분석
+# Detailed WIM Protocol Analysis
 
-## WIM (Wireless Interface Module) 개요
+## WIM (Wireless Interface Module) Overview
 
-WIM은 NRC7292 HaLow 드라이버에서 호스트와 펌웨어 간 통신을 담당하는 핵심 프로토콜입니다. 모든 무선 동작, 설정, 상태 관리가 WIM을 통해 이루어집니다.
+WIM is the core protocol responsible for communication between the host and firmware in the NRC7292 HaLow driver. All wireless operations, configurations, and state management are performed through WIM.
 
-## 1. WIM 프로토콜 구조
+## 1. WIM Protocol Structure
 
-### A. WIM 메시지 헤더
+### A. WIM Message Header
 ```c
-// wim.h에 정의된 WIM 헤더 구조
+// WIM header structure defined in wim.h
 struct wim_header {
     union {
         struct {
-            uint8_t  command;     // 명령 타입 (0-26)
-            uint8_t  subcommand;  // 하위 명령 (필요시)
+            uint8_t  command;     // Command type (0-26)
+            uint8_t  subcommand;  // Subcommand (when needed)
         } cmd;
         struct {
-            uint8_t  result;      // 응답 결과 코드
-            uint8_t  reserved;    // 예약 필드
+            uint8_t  result;      // Response result code
+            uint8_t  reserved;    // Reserved field
         } resp;
         struct {
-            uint8_t  event;       // 이벤트 타입 (0-11)
-            uint8_t  reserved;    // 예약 필드
+            uint8_t  event;       // Event type (0-11)
+            uint8_t  reserved;    // Reserved field
         } evt;
     };
-    uint8_t  sequence;           // 시퀀스 번호 (요청/응답 매칭)
-    uint8_t  tlv_count;          // TLV 파라미터 개수
+    uint8_t  sequence;           // Sequence number (request/response matching)
+    uint8_t  tlv_count;          // Number of TLV parameters
 };
 ```
 
-### B. WIM 메시지 타입
+### B. WIM Message Types
 ```c
-// 메시지 방향에 따른 분류
-1. Request (요청): 호스트 → 펌웨어
-2. Response (응답): 펌웨어 → 호스트  
-3. Event (이벤트): 펌웨어 → 호스트 (비동기)
+// Classification by message direction
+1. Request: Host → Firmware
+2. Response: Firmware → Host  
+3. Event: Firmware → Host (asynchronous)
 ```
 
-## 2. WIM 명령어 체계
+## 2. WIM Command System
 
-### A. 주요 WIM 명령어 (27개)
+### A. Main WIM Commands (27 commands)
 ```c
-// wim-types.h에 정의된 명령어들
+// Commands defined in wim-types.h
 enum WIM_CMD_TYPE {
-    WIM_CMD_INIT = 0,           // 초기화
-    WIM_CMD_START,              // 시작
-    WIM_CMD_STOP,               // 정지
-    WIM_CMD_SET_STA_TYPE,       // 스테이션 타입 설정
-    WIM_CMD_SET_SECURITY_MODE,  // 보안 모드 설정
-    WIM_CMD_SET_BSS_INFO,       // BSS 정보 설정
-    WIM_CMD_CONNECT,            // 연결
-    WIM_CMD_DISCONNECT,         // 연결 해제
-    WIM_CMD_SCAN,               // 스캔
-    WIM_CMD_SET_CHANNEL,        // 채널 설정
-    WIM_CMD_SET_TXPOWER,        // 송신 전력 설정
-    WIM_CMD_INSTALL_KEY,        // 보안 키 설치
-    WIM_CMD_AMPDU_ACTION,       // AMPDU 제어
-    WIM_CMD_BA_ACTION,          // Block ACK 제어
-    WIM_CMD_SET_LISTEN_INTERVAL, // Listen Interval 설정
-    WIM_CMD_SET_BEACON_INTERVAL, // Beacon Interval 설정
-    WIM_CMD_SET_RTS_THRESHOLD,  // RTS 임계값
-    WIM_CMD_SET_FRAG_THRESHOLD, // 단편화 임계값
-    WIM_CMD_SET_BG_SCAN_INTERVAL, // 백그라운드 스캔
+    WIM_CMD_INIT = 0,           // Initialize
+    WIM_CMD_START,              // Start
+    WIM_CMD_STOP,               // Stop
+    WIM_CMD_SET_STA_TYPE,       // Set station type
+    WIM_CMD_SET_SECURITY_MODE,  // Set security mode
+    WIM_CMD_SET_BSS_INFO,       // Set BSS information
+    WIM_CMD_CONNECT,            // Connect
+    WIM_CMD_DISCONNECT,         // Disconnect
+    WIM_CMD_SCAN,               // Scan
+    WIM_CMD_SET_CHANNEL,        // Set channel
+    WIM_CMD_SET_TXPOWER,        // Set transmit power
+    WIM_CMD_INSTALL_KEY,        // Install security key
+    WIM_CMD_AMPDU_ACTION,       // AMPDU control
+    WIM_CMD_BA_ACTION,          // Block ACK control
+    WIM_CMD_SET_LISTEN_INTERVAL, // Set Listen Interval
+    WIM_CMD_SET_BEACON_INTERVAL, // Set Beacon Interval
+    WIM_CMD_SET_RTS_THRESHOLD,  // RTS threshold
+    WIM_CMD_SET_FRAG_THRESHOLD, // Fragmentation threshold
+    WIM_CMD_SET_BG_SCAN_INTERVAL, // Background scan
     WIM_CMD_SET_SHORT_GI,       // Short Guard Interval
-    WIM_CMD_SET_11N_INFO,       // 802.11n 정보
-    WIM_CMD_SET_S1G_INFO,       // S1G 정보
-    WIM_CMD_GET_VERSION,        // 버전 조회
-    WIM_CMD_GET_STATS,          // 통계 조회
-    WIM_CMD_SLEEP,              // 절전 모드
-    WIM_CMD_WAKEUP,             // 웨이크업
+    WIM_CMD_SET_11N_INFO,       // 802.11n information
+    WIM_CMD_SET_S1G_INFO,       // S1G information
+    WIM_CMD_GET_VERSION,        // Get version
+    WIM_CMD_GET_STATS,          // Get statistics
+    WIM_CMD_SLEEP,              // Sleep mode
+    WIM_CMD_WAKEUP,             // Wake up
     WIM_CMD_MAX
 };
 ```
 
-### B. 명령어 분류별 기능
+### B. Command Functions by Category
 
-#### 시스템 제어 명령
+#### System Control Commands
 ```c
-- WIM_CMD_INIT: 펌웨어 초기화
-- WIM_CMD_START: 무선 기능 시작
-- WIM_CMD_STOP: 무선 기능 정지
-- WIM_CMD_GET_VERSION: 펌웨어 버전 확인
-- WIM_CMD_GET_STATS: 성능 통계 조회
+- WIM_CMD_INIT: Firmware initialization
+- WIM_CMD_START: Start wireless functions
+- WIM_CMD_STOP: Stop wireless functions
+- WIM_CMD_GET_VERSION: Check firmware version
+- WIM_CMD_GET_STATS: Query performance statistics
 ```
 
-#### 네트워크 설정 명령
+#### Network Configuration Commands
 ```c
-- WIM_CMD_SET_STA_TYPE: AP/STA/Monitor/Mesh 모드 설정
-- WIM_CMD_SET_BSS_INFO: SSID, BSSID 등 BSS 정보
-- WIM_CMD_CONNECT: 네트워크 연결
-- WIM_CMD_DISCONNECT: 네트워크 연결 해제
-- WIM_CMD_SCAN: 채널 스캔
+- WIM_CMD_SET_STA_TYPE: Set AP/STA/Monitor/Mesh mode
+- WIM_CMD_SET_BSS_INFO: SSID, BSSID and other BSS information
+- WIM_CMD_CONNECT: Network connection
+- WIM_CMD_DISCONNECT: Network disconnection
+- WIM_CMD_SCAN: Channel scan
 ```
 
-#### RF 및 PHY 제어 명령
+#### RF and PHY Control Commands
 ```c
-- WIM_CMD_SET_CHANNEL: 동작 채널 설정
-- WIM_CMD_SET_TXPOWER: 송신 전력 제어
-- WIM_CMD_SET_RTS_THRESHOLD: RTS/CTS 임계값
-- WIM_CMD_SET_FRAG_THRESHOLD: 패킷 단편화 임계값
-- WIM_CMD_SET_SHORT_GI: Guard Interval 설정
+- WIM_CMD_SET_CHANNEL: Set operating channel
+- WIM_CMD_SET_TXPOWER: Transmit power control
+- WIM_CMD_SET_RTS_THRESHOLD: RTS/CTS threshold
+- WIM_CMD_SET_FRAG_THRESHOLD: Packet fragmentation threshold
+- WIM_CMD_SET_SHORT_GI: Guard Interval setting
 ```
 
-#### 보안 관련 명령
+#### Security-related Commands
 ```c
-- WIM_CMD_SET_SECURITY_MODE: WPA/WPA2/WPA3 모드
-- WIM_CMD_INSTALL_KEY: 암호화 키 설치
+- WIM_CMD_SET_SECURITY_MODE: WPA/WPA2/WPA3 mode
+- WIM_CMD_INSTALL_KEY: Install encryption key
 ```
 
-#### 고급 기능 명령
+#### Advanced Feature Commands
 ```c
-- WIM_CMD_AMPDU_ACTION: AMPDU 집성 제어
-- WIM_CMD_BA_ACTION: Block ACK 세션 관리
-- WIM_CMD_SET_11N_INFO: 802.11n 기능 설정
-- WIM_CMD_SET_S1G_INFO: HaLow S1G 기능 설정
+- WIM_CMD_AMPDU_ACTION: AMPDU aggregation control
+- WIM_CMD_BA_ACTION: Block ACK session management
+- WIM_CMD_SET_11N_INFO: 802.11n feature settings
+- WIM_CMD_SET_S1G_INFO: HaLow S1G feature settings
 ```
 
-#### 전력 관리 명령
+#### Power Management Commands
 ```c
-- WIM_CMD_SLEEP: 절전 모드 진입
-- WIM_CMD_WAKEUP: 절전 모드 해제
-- WIM_CMD_SET_LISTEN_INTERVAL: STA 절전 주기
+- WIM_CMD_SLEEP: Enter sleep mode
+- WIM_CMD_WAKEUP: Exit sleep mode
+- WIM_CMD_SET_LISTEN_INTERVAL: STA power save cycle
 ```
 
-## 3. WIM 이벤트 시스템
+## 3. WIM Event System
 
-### A. WIM 이벤트 타입 (12개)
+### A. WIM Event Types (12 events)
 ```c
 enum WIM_EVENT_TYPE {
-    WIM_EVENT_SCAN_COMPLETED = 0,    // 스캔 완료
-    WIM_EVENT_CONNECTED,             // 연결 완료
-    WIM_EVENT_DISCONNECTED,          // 연결 해제
-    WIM_EVENT_AUTH_STATE_CHANGED,    // 인증 상태 변경
-    WIM_EVENT_ASSOC_STATE_CHANGED,   // 연결 상태 변경
-    WIM_EVENT_KEY_INSTALLED,         // 키 설치 완료
-    WIM_EVENT_BA_SESSION_STARTED,    // BA 세션 시작
-    WIM_EVENT_BA_SESSION_STOPPED,    // BA 세션 종료
-    WIM_EVENT_BEACON_LOSS,           // 비콘 손실
-    WIM_EVENT_SIGNAL_MONITOR,        // 신호 강도 모니터링
-    WIM_EVENT_SLEEP_NOTIFY,          // 절전 상태 알림
+    WIM_EVENT_SCAN_COMPLETED = 0,    // Scan completed
+    WIM_EVENT_CONNECTED,             // Connection completed
+    WIM_EVENT_DISCONNECTED,          // Disconnected
+    WIM_EVENT_AUTH_STATE_CHANGED,    // Authentication state changed
+    WIM_EVENT_ASSOC_STATE_CHANGED,   // Association state changed
+    WIM_EVENT_KEY_INSTALLED,         // Key installation completed
+    WIM_EVENT_BA_SESSION_STARTED,    // BA session started
+    WIM_EVENT_BA_SESSION_STOPPED,    // BA session stopped
+    WIM_EVENT_BEACON_LOSS,           // Beacon loss
+    WIM_EVENT_SIGNAL_MONITOR,        // Signal strength monitoring
+    WIM_EVENT_SLEEP_NOTIFY,          // Sleep state notification
     WIM_EVENT_MAX
 };
 ```
 
-### B. 이벤트 처리 메커니즘
+### B. Event Processing Mechanism
 ```c
-// 이벤트 수신 및 처리 (wim.c)
+// Event reception and processing (wim.c)
 static void nrc_wim_process_event(struct nrc *nw, struct sk_buff *skb)
 {
     struct wim_header *wh = (struct wim_header *)skb->data;
@@ -160,101 +160,101 @@ static void nrc_wim_process_event(struct nrc *nw, struct sk_buff *skb)
         case WIM_EVENT_DISCONNECTED:
             nrc_mac_disconnected(nw, skb);
             break;
-        // ... 기타 이벤트 처리
+        // ... Other event processing
     }
 }
 ```
 
-## 4. TLV (Type-Length-Value) 시스템
+## 4. TLV (Type-Length-Value) System
 
-### A. TLV 구조
+### A. TLV Structure
 ```c
 struct wim_tlv {
-    uint8_t  type;     // TLV 타입 (0-80+)
-    uint8_t  length;   // 데이터 길이
-    uint8_t  value[];  // 실제 데이터
+    uint8_t  type;     // TLV type (0-80+)
+    uint8_t  length;   // Data length
+    uint8_t  value[];  // Actual data
 } __packed;
 ```
 
-### B. 주요 TLV 타입들 (80개 이상)
+### B. Major TLV Types (80+ types)
 ```c
-// 기본 네트워크 정보
+// Basic network information
 #define WIM_TLV_SSID               1
 #define WIM_TLV_BSSID              2
 #define WIM_TLV_CHANNEL            3
 #define WIM_TLV_TXPOWER            4
 
-// 보안 관련
+// Security-related
 #define WIM_TLV_SECURITY_MODE      10
 #define WIM_TLV_KEY_INDEX          11
 #define WIM_TLV_KEY_TYPE           12
 #define WIM_TLV_KEY_VALUE          13
 
-// PHY/RF 설정
+// PHY/RF settings
 #define WIM_TLV_RTS_THRESHOLD      20
 #define WIM_TLV_FRAG_THRESHOLD     21
 #define WIM_TLV_SHORT_GI           22
 #define WIM_TLV_GUARD_INTERVAL     23
 
-// HaLow S1G 특화
+// HaLow S1G specific
 #define WIM_TLV_S1G_CHANNEL        30
 #define WIM_TLV_S1G_MCS            31
 #define WIM_TLV_S1G_BW             32
 
-// AMPDU 관련
+// AMPDU-related
 #define WIM_TLV_AMPDU_ENABLE       40
 #define WIM_TLV_AMPDU_SIZE         41
 #define WIM_TLV_BA_WIN_SIZE        42
 
-// 전력 관리
+// Power management
 #define WIM_TLV_PS_MODE            50
 #define WIM_TLV_LISTEN_INTERVAL    51
 #define WIM_TLV_SLEEP_DURATION     52
 
-// 스캔 관련
+// Scan-related
 #define WIM_TLV_SCAN_SSID          60
 #define WIM_TLV_SCAN_CHANNEL       61
 #define WIM_TLV_SCAN_TYPE          62
 
-// 통계 및 모니터링
+// Statistics and monitoring
 #define WIM_TLV_STATS_TYPE         70
 #define WIM_TLV_RSSI               71
 #define WIM_TLV_SNR                72
 ```
 
-### C. TLV 인코딩/디코딩 함수들
+### C. TLV Encoding/Decoding Functions
 ```c
-// TLV 추가 함수들 (wim.c)
+// TLV addition functions (wim.c)
 int nrc_wim_add_tlv_u8(struct sk_buff *skb, u8 type, u8 value);
 int nrc_wim_add_tlv_u16(struct sk_buff *skb, u8 type, u16 value);
 int nrc_wim_add_tlv_u32(struct sk_buff *skb, u8 type, u32 value);
 int nrc_wim_add_tlv_data(struct sk_buff *skb, u8 type, const void *data, u8 len);
 
-// TLV 파싱 함수들
+// TLV parsing functions
 u8 *nrc_wim_get_tlv(struct sk_buff *skb, u8 type, u8 *length);
 u8 nrc_wim_get_tlv_u8(struct sk_buff *skb, u8 type);
 u16 nrc_wim_get_tlv_u16(struct sk_buff *skb, u8 type);
 u32 nrc_wim_get_tlv_u32(struct sk_buff *skb, u8 type);
 ```
 
-## 5. WIM 통신 패턴
+## 5. WIM Communication Patterns
 
-### A. 비동기 명령 (Fire-and-Forget)
+### A. Asynchronous Commands (Fire-and-Forget)
 ```c
-// 단순 설정 명령 - 응답 대기 없음
+// Simple configuration command - no response wait
 int nrc_wim_set_channel(struct nrc *nw, int channel)
 {
     struct sk_buff *skb = nrc_wim_alloc_skb(WIM_CMD_SET_CHANNEL, 1);
     
     nrc_wim_add_tlv_u8(skb, WIM_TLV_CHANNEL, channel);
     
-    return nrc_wim_send(nw, skb);  // 전송 후 즉시 반환
+    return nrc_wim_send(nw, skb);  // Send and return immediately
 }
 ```
 
-### B. 동기 명령 (요청-응답)
+### B. Synchronous Commands (Request-Response)
 ```c
-// 응답이 필요한 명령 - 완료 대기
+// Command requiring response - wait for completion
 int nrc_wim_connect(struct nrc *nw, struct ieee80211_bss_conf *bss_conf)
 {
     struct sk_buff *skb = nrc_wim_alloc_skb(WIM_CMD_CONNECT, 3);
@@ -263,50 +263,50 @@ int nrc_wim_connect(struct nrc *nw, struct ieee80211_bss_conf *bss_conf)
     nrc_wim_add_tlv_data(skb, WIM_TLV_BSSID, bss_conf->bssid, ETH_ALEN);
     nrc_wim_add_tlv_u8(skb, WIM_TLV_CHANNEL, bss_conf->channel);
     
-    return nrc_wim_send_request_wait(nw, skb, 5000);  // 5초 타임아웃
+    return nrc_wim_send_request_wait(nw, skb, 5000);  // 5 second timeout
 }
 ```
 
-### C. 이벤트 처리 (펌웨어 → 호스트)
+### C. Event Processing (Firmware → Host)
 ```c
-// 펌웨어에서 발생한 이벤트 처리
+// Processing events generated by firmware
 static void nrc_wim_event_handler(struct nrc *nw, struct sk_buff *skb)
 {
     struct wim_header *wh = (struct wim_header *)skb->data;
     
-    // 이벤트 타입에 따른 콜백 호출
+    // Callback invocation based on event type
     switch (wh->evt.event) {
         case WIM_EVENT_SCAN_COMPLETED:
-            complete(&nw->scan_done);  // 스캔 완료 신호
+            complete(&nw->scan_done);  // Scan completion signal
             break;
         case WIM_EVENT_CONNECTED:
-            netif_carrier_on(nw->netdev);  // 네트워크 활성화
+            netif_carrier_on(nw->netdev);  // Network activation
             break;
     }
 }
 ```
 
-## 6. WIM 메시지 생명주기
+## 6. WIM Message Lifecycle
 
-### A. 명령 생성 및 전송
+### A. Command Creation and Transmission
 ```
-1. nrc_wim_alloc_skb() - 메시지 버퍼 할당
-2. nrc_wim_add_tlv_*() - 파라미터 추가
-3. nrc_wim_send() - HIF를 통한 전송
-4. 시퀀스 번호 할당 및 추적
-```
-
-### B. 응답 수신 및 처리
-```
-1. HIF에서 WIM 메시지 수신
-2. 시퀀스 번호로 요청 매칭
-3. completion 객체로 대기 중인 스레드 깨우기
-4. TLV 파라미터 파싱 및 반환
+1. nrc_wim_alloc_skb() - Allocate message buffer
+2. nrc_wim_add_tlv_*() - Add parameters
+3. nrc_wim_send() - Transmission through HIF
+4. Sequence number assignment and tracking
 ```
 
-### C. 메모리 관리
+### B. Response Reception and Processing
+```
+1. Receive WIM message from HIF
+2. Match request by sequence number
+3. Wake up waiting thread using completion object
+4. Parse TLV parameters and return
+```
+
+### C. Memory Management
 ```c
-// 자동 메모리 정리
+// Automatic memory cleanup
 static void nrc_wim_cleanup_request(struct nrc_wim_request *req)
 {
     if (req->response_skb) {
@@ -345,9 +345,9 @@ static bool nrc_wim_ready(struct nrc *nw)
 }
 ```
 
-### C. 에러 응답 처리
+### C. Error Response Handling
 ```c
-// WIM 응답 에러 코드
+// WIM response error codes
 enum WIM_RESULT_CODE {
     WIM_RESULT_SUCCESS = 0,
     WIM_RESULT_INVALID_PARAM,
@@ -358,38 +358,38 @@ enum WIM_RESULT_CODE {
 };
 ```
 
-## 8. WIM과 HIF 통합
+## 8. WIM and HIF Integration
 
-### A. 이중 큐 시스템
+### A. Dual Queue System
 ```c
-// HIF 레벨에서 두 가지 큐 운영
-1. Frame Queue: 데이터 프레임 전송
-2. WIM Queue: 제어 명령 전송 (우선순위 높음)
+// Two queues operated at HIF level
+1. Frame Queue: Data frame transmission
+2. WIM Queue: Control command transmission (higher priority)
 ```
 
-### B. 플로우 제어
+### B. Flow Control
 ```c
-// 크레딧 기반 전송 제어
-- WIM 명령은 별도 크레딧 풀 사용
-- 프레임과 독립적인 흐름 제어
-- 펌웨어 과부하 방지
+// Credit-based transmission control
+- WIM commands use separate credit pool
+- Independent flow control from frames
+- Prevents firmware overload
 ```
 
-## 9. WIM 프로토콜의 장점
+## 9. Advantages of WIM Protocol
 
-### A. 확장성
-- TLV 구조로 새로운 파라미터 추가 용이
-- 하위 호환성 유지하면서 기능 확장
-- 펌웨어 업데이트 시 프로토콜 호환성
+### A. Extensibility
+- Easy addition of new parameters with TLV structure
+- Function expansion while maintaining backward compatibility
+- Protocol compatibility during firmware updates
 
-### B. 안정성  
-- 시퀀스 번호로 메시지 추적
-- 타임아웃과 재시도 메커니즘
-- 메모리 누수 방지 자동 정리
+### B. Stability  
+- Message tracking with sequence numbers
+- Timeout and retry mechanisms
+- Automatic cleanup to prevent memory leaks
 
-### C. 성능
-- 비동기 처리로 블로킹 최소화
-- 우선순위 기반 큐 관리
-- 효율적인 바이너리 인코딩
+### C. Performance
+- Minimized blocking with asynchronous processing
+- Priority-based queue management
+- Efficient binary encoding
 
-WIM 프로토콜은 NRC7292 HaLow 드라이버의 핵심으로, 복잡한 802.11ah 기능들을 체계적이고 안정적으로 제어할 수 있는 강력한 통신 인터페이스를 제공합니다.
+The WIM protocol is the core of the NRC7292 HaLow driver, providing a powerful communication interface that enables systematic and stable control of complex 802.11ah features.

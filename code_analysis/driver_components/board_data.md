@@ -1,20 +1,20 @@
-# 보드 데이터 (nrc-bd.c) 분석
+# Board Data (nrc-bd.c) Analysis
 
-## 파일 개요
-보드 데이터 관리는 각 국가의 무선 규제를 준수하기 위한 핵심 모듈입니다.
+## File Overview
+Board data management is a core module for complying with wireless regulations in each country.
 
-## 주요 기능
+## Main Functions
 
-### 1. 보드 데이터 파일 처리
+### 1. Board Data File Processing
 ```c
-// 파일 경로: /lib/firmware/{bd_name}
+// File path: /lib/firmware/{bd_name}
 static void * nrc_dump_load(struct nrc *nw, int len)
 ```
-- 커널 버전별 파일 시스템 접근 처리
-- 5.0 ~ 5.18 버전 호환성 지원
-- 메모리 관리 및 에러 처리
+- Kernel version-specific file system access handling
+- Support for versions 5.0 ~ 5.18 compatibility
+- Memory management and error handling
 
-### 2. 국가 코드 매핑
+### 2. Country Code Mapping
 ```c
 enum {
     CC_US=1, CC_JP, CC_K1, CC_TW, CC_EU, 
@@ -22,30 +22,30 @@ enum {
 } CC_TYPE;
 ```
 
-### 3. 채널 테이블 관리
-각 국가별로 정의된 채널 매핑:
-- S1G 주파수 (실제 HaLow 주파수)
-- Non-S1G 주파수 (WiFi 호환 주파수)
-- 채널 인덱스 매핑
+### 3. Channel Table Management
+Country-specific channel mapping definition:
+- S1G frequency (actual HaLow frequency)
+- Non-S1G frequency (WiFi compatible frequency)
+- Channel index mapping
 
-## 핵심 함수 분석
+## Core Function Analysis
 
 ### `nrc_read_bd_tx_pwr()`
-1. 국가 코드 식별
-2. 하드웨어 버전 매칭
-3. 보드 데이터 파싱
-4. 체크섬 검증
-5. 지원 채널 목록 구성
+1. Country code identification
+2. Hardware version matching
+3. Board data parsing
+4. Checksum verification
+5. Supported channel list construction
 
 ### `nrc_check_bd()`
-보드 데이터 파일의 무결성 검사:
-- 파일 크기 검증
-- 헤더 정보 확인
-- 체크섬 계산 및 비교
+Board data file integrity check:
+- File size verification
+- Header information validation
+- Checksum calculation and comparison
 
-## 데이터 구조
+## Data Structures
 
-### BDF (Board Data File) 구조
+### BDF (Board Data File) Structure
 ```c
 struct BDF {
     uint8_t ver_major;
@@ -57,26 +57,26 @@ struct BDF {
 };
 ```
 
-### WIM BD 파라미터
+### WIM BD Parameters
 ```c
 struct wim_bd_param {
-    uint16_t type;          // 국가 코드
-    uint16_t hw_version;    // 하드웨어 버전
-    uint16_t length;        // 데이터 길이
-    uint16_t checksum;      // 체크섬
-    uint8_t value[];        // 실제 데이터
+    uint16_t type;          // Country code
+    uint16_t hw_version;    // Hardware version
+    uint16_t length;        // Data length
+    uint16_t checksum;      // Checksum
+    uint8_t value[];        // Actual data
 };
 ```
 
-## 특이사항
+## Special Features
 
-### 한국의 특별 처리
-- K1 (USN1): LBT 요구사항
-- K2 (USN5): MIC 검출 요구사항
-- `kr_band` 파라미터로 동적 선택
+### Special Handling for Korea
+- K1 (USN1): LBT requirements
+- K2 (USN5): MIC detection requirements
+- Dynamic selection via `kr_band` parameter
 
-### 커널 버전 호환성
-복잡한 조건부 컴파일로 다양한 커널 버전 지원:
-- `get_fs()`, `set_fs()` API 변화 대응
-- `force_uaccess_begin()` 사용
-- `kernel_read()` 함수 시그니처 변화 처리
+### Kernel Version Compatibility
+Support for various kernel versions through complex conditional compilation:
+- Handling `get_fs()`, `set_fs()` API changes
+- Using `force_uaccess_begin()`
+- Handling `kernel_read()` function signature changes

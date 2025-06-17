@@ -81,10 +81,15 @@ cd package/src/nrc/test/netlink && python3 -c "from nrcnetlink import NrcNetlink
 ```
 
 ## Important Notes
-- Always commit with Co-Authored-By: Liam Lee <oyongjoo@gmail.com>
 - Focus on learning NRC7292 HaLow driver architecture
 - Maintain detailed documentation for future reference
 - Prefer editing existing files over creating new ones
+
+## Git Commit Rules
+- **Author**: Always use "Liam Lee <oyongjoo@gmail.com>" as the commit author
+- **Co-Author**: Always include "Co-Authored-By: Liam Lee <oyongjoo@gmail.com>" in commit message
+- **Claude Attribution**: Do NOT include "Generated with Claude Code" or similar Claude references
+- **Commit Message Format**: Clear, descriptive commit messages without AI attribution
 
 ## Documentation Guidelines
 - **Bilingual Documentation**: Create both English and Korean versions for all documents
