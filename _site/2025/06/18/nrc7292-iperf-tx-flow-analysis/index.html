@@ -50,89 +50,59 @@ iperf3 <span class="nt">-c</span> 192.168.1.100 <span class="nt">-u</span> <span
 
 <p>The following sequence diagram shows the complete TCP transmission flow through the NRC7292 driver:</p>
 
-<pre><code class="language-mermaid">sequenceDiagram
-    participant App as iperf3 Application
-    participant Net as Network Stack
-    participant Mac as mac80211
-    participant NRC as NRC Driver
-    participant HIF as HIF Layer
-    participant FW as Firmware
-    participant HW as Hardware
+<h3 id="tcp-transmission-flow-steps">TCP Transmission Flow Steps:</h3>
 
-    Note over App,HW: TCP Data Transmission (1460 bytes payload)
-    
-    App-&gt;&gt;Net: write() system call
-    Net-&gt;&gt;Net: TCP segmentation and IP header addition
-    Net-&gt;&gt;Mac: dev_queue_xmit()
-    
-    Mac-&gt;&gt;NRC: ieee80211_tx() call
-    Note over Mac,NRC: Passed from mac80211 framework to driver
-    
-    NRC-&gt;&gt;NRC: nrc_mac_tx() [nrc-trx.c:75]
-    Note over NRC: TX entry point, structure initialization
-    
-    NRC-&gt;&gt;NRC: setup_ba_session() [nrc-trx.c:229]
-    Note over NRC: Automatic AMPDU BA session setup
-    
-    NRC-&gt;&gt;NRC: TX handler chain execution
-    NRC-&gt;&gt;NRC: tx_h_put_qos_control() [nrc-trx.c:579]
-    Note over NRC: Convert Non-QoS → QoS data
-    
-    alt Credit sufficient
-        NRC-&gt;&gt;HIF: nrc_xmit_frame() [hif.c:711]
-        HIF-&gt;&gt;HIF: nrc_hif_enqueue() [hif.c:98]
-        HIF-&gt;&gt;HIF: nrc_hif_work() [hif.c:177]
-        HIF-&gt;&gt;HIF: nrc_hif_xmit() [nrc-hif-cspi.c:403]
-        
-        HIF-&gt;&gt;FW: C-SPI command transmission
-        FW-&gt;&gt;HW: IEEE 802.11ah frame transmission
-        
-        HW--&gt;&gt;FW: TX completion interrupt
-        FW--&gt;&gt;HIF: WIM Credit Report
-        HIF-&gt;&gt;NRC: nrc_kick_txq() [nrc-mac80211.c:587]
-        NRC-&gt;&gt;NRC: nrc_tx_tasklet() [nrc-mac80211.c:545]
-    else Credit insufficient
-        NRC-&gt;&gt;NRC: Store packet in TXQ
-    end
-</code></pre>
+<ol>
+  <li><strong>iperf3 Application</strong> → <code class="language-plaintext highlighter-rouge">write()</code> system call</li>
+  <li><strong>Network Stack</strong> → TCP segmentation and IP header addition → <code class="language-plaintext highlighter-rouge">dev_queue_xmit()</code></li>
+  <li><strong>mac80211</strong> → <code class="language-plaintext highlighter-rouge">ieee80211_tx()</code> call to NRC driver</li>
+  <li><strong>NRC Driver</strong> → <code class="language-plaintext highlighter-rouge">nrc_mac_tx()</code> [nrc-trx.c:75] - TX entry point</li>
+  <li><strong>NRC Driver</strong> → <code class="language-plaintext highlighter-rouge">setup_ba_session()</code> [nrc-trx.c:229] - AMPDU BA session setup</li>
+  <li><strong>NRC Driver</strong> → TX handler chain execution</li>
+  <li><strong>NRC Driver</strong> → <code class="language-plaintext highlighter-rouge">tx_h_put_qos_control()</code> [nrc-trx.c:579] - Convert to QoS data</li>
+  <li><strong>Credit Check</strong> → If sufficient:
+    <ul>
+      <li><code class="language-plaintext highlighter-rouge">nrc_xmit_frame()</code> [hif.c:711]</li>
+      <li><code class="language-plaintext highlighter-rouge">nrc_hif_enqueue()</code> [hif.c:98]</li>
+      <li><code class="language-plaintext highlighter-rouge">nrc_hif_work()</code> [hif.c:177]</li>
+      <li><code class="language-plaintext highlighter-rouge">nrc_hif_xmit()</code> [nrc-hif-cspi.c:403]</li>
+    </ul>
+  </li>
+  <li><strong>HIF Layer</strong> → C-SPI command transmission to firmware</li>
+  <li><strong>Firmware</strong> → IEEE 802.11ah frame transmission to hardware</li>
+  <li><strong>Hardware</strong> → TX completion interrupt back to firmware</li>
+  <li><strong>Firmware</strong> → WIM Credit Report back to HIF</li>
+  <li><strong>HIF Layer</strong> → <code class="language-plaintext highlighter-rouge">nrc_kick_txq()</code> [nrc-mac80211.c:587]</li>
+  <li><strong>NRC Driver</strong> → <code class="language-plaintext highlighter-rouge">nrc_tx_tasklet()</code> [nrc-mac80211.c:545] - Process pending packets</li>
+</ol>
 
 <h2 id="udp-data-transmission-flow">UDP Data Transmission Flow</h2>
 
 <p>UDP transmission follows a similar path but with optimizations for high-throughput scenarios:</p>
 
-<pre><code class="language-mermaid">sequenceDiagram
-    participant App as iperf3 Application
-    participant Net as Network Stack
-    participant Mac as mac80211
-    participant NRC as NRC Driver
-    participant HIF as HIF Layer
-    participant FW as Firmware
-    participant HW as Hardware
+<h3 id="udp-transmission-flow-steps">UDP Transmission Flow Steps:</h3>
 
-    Note over App,HW: UDP Data Transmission (1472 bytes payload)
-    
-    App-&gt;&gt;Net: sendto() system call
-    Net-&gt;&gt;Mac: dev_queue_xmit()
-    
-    Mac-&gt;&gt;NRC: ieee80211_tx() call
-    NRC-&gt;&gt;NRC: nrc_mac_tx() [nrc-trx.c:75]
-    NRC-&gt;&gt;NRC: tx_h_put_qos_control() [nrc-trx.c:579]
-    
-    loop High-speed continuous transmission
-        alt Credit sufficient
-            NRC-&gt;&gt;HIF: nrc_xmit_frame() [hif.c:711]
-            HIF-&gt;&gt;FW: C-SPI burst transmission
-            FW-&gt;&gt;HW: Continuous wireless frame transmission
-        else Credit insufficient
-            break
-        end
-    end
-    
-    Note over FW,HW: After batch transmission
-    HW--&gt;&gt;FW: Batch TX completion interrupt
-    FW--&gt;&gt;HIF: WIM Credit Report (batch)
-    HIF-&gt;&gt;NRC: nrc_kick_txq()
-</code></pre>
+<ol>
+  <li><strong>iperf3 Application</strong> → <code class="language-plaintext highlighter-rouge">sendto()</code> system call</li>
+  <li><strong>Network Stack</strong> → UDP header and IP header addition → <code class="language-plaintext highlighter-rouge">dev_queue_xmit()</code></li>
+  <li><strong>mac80211</strong> → <code class="language-plaintext highlighter-rouge">ieee80211_tx()</code> call to NRC driver</li>
+  <li><strong>NRC Driver</strong> → <code class="language-plaintext highlighter-rouge">nrc_mac_tx()</code> [nrc-trx.c:75]</li>
+  <li><strong>NRC Driver</strong> → <code class="language-plaintext highlighter-rouge">tx_h_put_qos_control()</code> [nrc-trx.c:579] - Convert UDP to QoS UDP</li>
+  <li><strong>High-speed Loop</strong> → Continuous transmission while credit sufficient:
+    <ul>
+      <li><code class="language-plaintext highlighter-rouge">nrc_xmit_frame()</code> [hif.c:711]</li>
+      <li>C-SPI burst transmission to firmware</li>
+      <li>Continuous wireless frame transmission</li>
+    </ul>
+  </li>
+  <li><strong>Batch Completion</strong> → After multiple frames:
+    <ul>
+      <li>Hardware sends batch TX completion interrupt</li>
+      <li>Firmware sends WIM Credit Report (batch)</li>
+      <li><code class="language-plaintext highlighter-rouge">nrc_kick_txq()</code> to process waiting packets</li>
+    </ul>
+  </li>
+</ol>
 
 <h2 id="key-differences-tcp-vs-udp">Key Differences: TCP vs UDP</h2>
 

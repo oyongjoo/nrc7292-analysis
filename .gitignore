@@ -1,1 +1,6 @@
 nrc7292_sw_pkg/
+_site/
+.sass-cache/
+.jekyll-cache/
+.jekyll-metadata
+vendor/
