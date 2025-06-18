@@ -777,7 +777,346 @@ struct frame_hdr {
 - 하드웨어 암호화 지원 (`WIM_CIPHER_TYPE_*`)
 - AMPDU 자동 관리
 
-## 10. 결론
+## 10. iperf TCP/UDP 전송 시나리오 상세 분석
+
+### 10.1 시나리오 개요
+
+실제 네트워크 성능 측정에 사용되는 iperf 도구를 통한 데이터 전송 시나리오를 분석합니다:
+
+```bash
+# TCP 전송 테스트
+iperf3 -c 192.168.1.100 -t 30 -i 1
+
+# UDP 전송 테스트  
+iperf3 -c 192.168.1.100 -u -b 10M -t 30 -i 1
+```
+
+### 10.2 TCP 데이터 전송 흐름도
+
+```mermaid
+sequenceDiagram
+    participant App as iperf3 Application
+    participant Net as Network Stack
+    participant Mac as mac80211
+    participant NRC as NRC Driver
+    participant HIF as HIF Layer
+    participant FW as Firmware
+    participant HW as Hardware
+
+    Note over App,HW: TCP 데이터 전송 (예: 1460 bytes payload)
+    
+    App->>Net: write() system call
+    Net->>Net: TCP 세그멘테이션 및 IP 헤더 추가
+    Net->>Mac: dev_queue_xmit()
+    
+    Mac->>NRC: ieee80211_tx() 호출
+    Note over Mac,NRC: mac80211 프레임워크에서 드라이버로 전달
+    
+    NRC->>NRC: nrc_mac_tx() [nrc-trx.c:75]
+    Note over NRC: TX 진입점, 구조체 초기화
+    
+    NRC->>NRC: VIF 유효성 검증
+    NRC->>NRC: setup_ba_session() [nrc-trx.c:229]
+    Note over NRC: AMPDU BA 세션 자동 설정
+    
+    NRC->>NRC: TX 핸들러 체인 실행
+    Note over NRC: 순차적 핸들러 처리
+    
+    NRC->>NRC: tx_h_debug_print() [nrc-trx.c:322]
+    NRC->>NRC: tx_h_debug_state() [nrc-trx.c:378]
+    NRC->>NRC: tx_h_put_iv() [nrc-trx.c:525]
+    Note over NRC: 보안 IV 헤더 추가 (암호화 시)
+    
+    NRC->>NRC: tx_h_put_qos_control() [nrc-trx.c:579]
+    Note over NRC: Non-QoS → QoS 데이터 변환
+    
+    NRC->>NRC: 크레딧 가용성 확인
+    alt 크레딧 충분
+        NRC->>HIF: nrc_xmit_frame() [hif.c:711]
+        Note over HIF: HIF 헤더 및 Frame 헤더 추가
+        
+        HIF->>HIF: HIF 헤더 구성
+        Note over HIF: type=HIF_TYPE_FRAME, subtype=HIF_FRAME_SUB_DATA_BE
+        
+        HIF->>HIF: Frame 헤더 설정
+        Note over HIF: AC=BE(1), cipher, TLV 정보
+        
+        HIF->>HIF: 크레딧 차감
+        Note over HIF: atomic_add(credit, &nw->tx_pend[ac])
+        
+        HIF->>HIF: nrc_hif_enqueue() [hif.c:98]
+        Note over HIF: 우선순위 큐에 삽입
+        
+        HIF->>HIF: nrc_hif_work() [hif.c:177]
+        Note over HIF: 워크큐 기반 순차 처리
+        
+        HIF->>HIF: nrc_hif_xmit() [nrc-hif-cspi.c:403]
+        Note over HIF: CSPI 인터페이스로 전송
+        
+        HIF->>FW: C-SPI 명령 전송
+        Note over FW: [31:24]=0x50, [22]=1(write), [21]=0(inc), addr, len
+        
+        FW->>HW: 무선 프레임 전송
+        Note over HW: IEEE 802.11ah 프레임
+        
+        HW-->>FW: TX 완료 인터럽트
+        FW-->>HIF: WIM Credit Report
+        Note over FW,HIF: nrc_wim_update_tx_credit() [wim.c:695]
+        
+        HIF->>HIF: 크레딧 복원
+        Note over HIF: atomic_set(&nw->tx_credit[ac], report->ac[ac])
+        
+        HIF->>NRC: nrc_kick_txq() [nrc-mac80211.c:587]
+        Note over NRC: TX tasklet 스케줄링
+        
+        NRC->>NRC: nrc_tx_tasklet() [nrc-mac80211.c:545]
+        Note over NRC: 대기 중인 패킷들 처리
+        
+    else 크레딧 부족
+        NRC->>NRC: TXQ에 패킷 저장
+        Note over NRC: 크레딧 반환 시까지 대기
+    end
+```
+
+### 10.3 UDP 데이터 전송 흐름도
+
+```mermaid
+sequenceDiagram
+    participant App as iperf3 Application
+    participant Net as Network Stack
+    participant Mac as mac80211
+    participant NRC as NRC Driver
+    participant HIF as HIF Layer
+    participant FW as Firmware
+    participant HW as Hardware
+
+    Note over App,HW: UDP 데이터 전송 (예: 1472 bytes payload)
+    
+    App->>Net: sendto() system call
+    Net->>Net: UDP 헤더 및 IP 헤더 추가
+    Net->>Mac: dev_queue_xmit()
+    
+    Mac->>NRC: ieee80211_tx() 호출
+    Note over Mac,NRC: mac80211 프레임워크에서 드라이버로 전달
+    
+    NRC->>NRC: nrc_mac_tx() [nrc-trx.c:75]
+    
+    alt AMPDU 모드 활성화
+        NRC->>NRC: setup_ba_session() [nrc-trx.c:229]
+        Note over NRC: UDP도 QoS이므로 BA 세션 설정 가능
+    end
+    
+    NRC->>NRC: TX 핸들러 체인 실행
+    
+    NRC->>NRC: tx_h_put_qos_control() [nrc-trx.c:579]
+    Note over NRC: UDP → QoS UDP 변환, TID=0
+    
+    loop 고속 연속 전송
+        NRC->>NRC: 크레딧 확인
+        alt 크레딧 충분
+            NRC->>HIF: nrc_xmit_frame() [hif.c:711]
+            
+            HIF->>HIF: HIF 헤더 구성
+            Note over HIF: type=HIF_TYPE_FRAME, subtype=HIF_FRAME_SUB_DATA_BE
+            
+            HIF->>HIF: Frame 헤더 설정  
+            Note over HIF: AC=BE(1), no cipher (일반적으로)
+            
+            HIF->>HIF: 크레딧 차감
+            Note over HIF: credit = DIV_ROUND_UP(skb->len, buffer_size)
+            
+            HIF->>FW: C-SPI burst 전송
+            Note over FW: [23]=1(burst), 연속 패킷 전송
+            
+            FW->>HW: 연속 무선 프레임 전송
+            
+        else 크레딧 부족
+            NRC->>NRC: TX tasklet 대기
+            Note over NRC: 크레딧 반환 시까지 큐에서 대기
+            break
+        end
+    end
+    
+    Note over FW,HW: 배치 전송 완료 후
+    HW-->>FW: 배치 TX 완료 인터럽트
+    FW-->>HIF: WIM Credit Report (배치)
+    Note over FW,HIF: 여러 프레임의 크레딧 일괄 반환
+    
+    HIF->>HIF: 크레딧 대량 복원
+    HIF->>NRC: nrc_kick_txq()
+    NRC->>NRC: nrc_tx_tasklet()
+    Note over NRC: 대기 패킷들 연속 처리
+```
+
+### 10.4 TCP vs UDP 전송 차이점 분석
+
+#### 10.4.1 패킷 크기 및 분할
+
+**TCP (Maximum Segment Size)**:
+```c
+// 일반적인 TCP MSS: 1460 bytes (MTU 1500 - IP header 20 - TCP header 20)
+// HaLow MTU: 최대 2304 bytes (IEEE 802.11ah 규격)
+// 실제 payload: 1460 bytes
+```
+
+**UDP (User Datagram)**:
+```c
+// UDP 최대 크기: 65507 bytes (이론적)
+// 실제 전송: iperf3 기본 1472 bytes (MTU 1500 - IP header 20 - UDP header 8)
+// payload: 1472 bytes (TCP보다 12 bytes 더 큼)
+```
+
+#### 10.4.2 QoS 및 우선순위 처리
+
+**공통 처리** (`tx_h_put_qos_control`):
+```c
+// 모든 데이터 프레임을 QoS로 변환
+if (ieee80211_is_data(fc) && !ieee80211_is_data_qos(fc)) {
+    // QoS 제어 필드 추가
+    hdr->frame_control |= cpu_to_le16(IEEE80211_STYPE_QOS_DATA);
+    *((u16 *)(skb->data + 24)) = 0;  // TID=0 (Best Effort)
+}
+```
+
+#### 10.4.3 AMPDU Block ACK 세션
+
+**TCP 특성**:
+- 순서 보장 필요
+- 재전송 로직 내장
+- AMPDU 집약 효과 큼
+
+**UDP 특성**:
+- 순서 무관
+- 재전송 없음
+- 높은 처리량 우선
+
+#### 10.4.4 크레딧 소모 패턴
+
+**TCP 크레딧 계산**:
+```c
+// TCP 패킷 (1460 + headers)
+skb->len = 1460 + 24 + 2 + 8 + 4;  // payload + 802.11 + QoS + LLC + FCS = 1498
+credit = DIV_ROUND_UP(1498, nw->fwinfo.buffer_size);  // 일반적으로 256 bytes
+// credit = DIV_ROUND_UP(1498, 256) = 6 크레딧
+```
+
+**UDP 크레딧 계산**:
+```c
+// UDP 패킷 (1472 + headers)  
+skb->len = 1472 + 24 + 2 + 8 + 4;  // payload + 802.11 + QoS + LLC + FCS = 1510
+credit = DIV_ROUND_UP(1510, 256) = 6 크레딧
+```
+
+### 10.5 전송 완료 확인 메커니즘
+
+#### 10.5.1 하드웨어 레벨 확인
+
+**C-SPI 전송 완료**:
+```c
+// nrc_hif_xmit() 함수에서
+ret = nrc_spi_write(hdev, skb->data, skb->len);
+if (ret < 0) {
+    nrc_hif_free_skb(nw, skb);  // 크레딧 롤백
+    return ret;
+}
+// 성공 시 하드웨어 큐에 성공적으로 전달됨
+```
+
+#### 10.5.2 펌웨어 레벨 확인
+
+**무선 전송 완료 이벤트**:
+```c
+// wim.c:695 - nrc_wim_update_tx_credit()
+static int nrc_wim_update_tx_credit(struct nrc *nw, struct wim *wim)
+{
+    struct wim_credit_report *r = (void *)(wim + 1);
+    int ac;
+    
+    // 각 AC별 크레딧 업데이트
+    for (ac = 0; ac < (IEEE80211_NUM_ACS*3); ac++)
+        atomic_set(&nw->tx_credit[ac], r->v.ac[ac]);
+    
+    // 대기 중인 패킷 처리 재개
+    nrc_kick_txq(nw);
+    return 0;
+}
+```
+
+#### 10.5.3 전송 완료 확인 단계
+
+1. **SPI 전송 완료**: 하드웨어 큐 도달 확인
+2. **펌웨어 처리 완료**: 무선 프레임 생성 완료  
+3. **무선 전송 완료**: 실제 air interface 전송 완료
+4. **크레딧 반환**: 버퍼 공간 해제, 새 전송 가능
+
+### 10.6 iperf 성능 최적화 요소
+
+#### 10.6.1 배치 처리 최적화
+
+**워크큐 기반 배치 처리** (`nrc_hif_work`):
+```c
+// 우선순위별 큐 순차 처리
+for (i = ARRAY_SIZE(hdev->queue)-1; i >= 0; i--) {
+    for (;;) {
+        skb = skb_dequeue(&hdev->queue[i]);
+        if (!skb) break;
+        
+        ret = nrc_hif_xmit(hdev, skb);  // 연속 전송
+    }
+}
+```
+
+#### 10.6.2 크레딧 기반 플로우 컨트롤
+
+**동적 크레딧 관리**:
+- **BE(Best Effort)**: 40 크레딧 (가장 큰 할당)
+- **VI(Video)**: 8 크레딧
+- **VO(Voice)**: 8 크레딧  
+- **BK(Background)**: 4 크레딧
+
+#### 10.6.3 AMPDU 집약
+
+**자동 BA 세션 설정**:
+```c
+// setup_ba_session()에서
+ret = ieee80211_start_tx_ba_session(peer_sta, tid, 0);
+// 성공 시 여러 프레임을 하나의 AMPDU로 집약하여 효율성 증대
+```
+
+### 10.7 성능 모니터링 및 디버깅
+
+#### 10.7.1 통계 정보 수집
+
+**TX 통계** (`nrc-stats.c`):
+```c
+// 전송 통계 카운터
+nw->stats.tx_packets++;
+nw->stats.tx_bytes += skb->len;
+
+// AC별 전송 통계
+nw->stats.tx_ac[ac].packets++;
+nw->stats.tx_ac[ac].bytes += skb->len;
+```
+
+#### 10.7.2 디버그 출력
+
+**프레임별 디버그** (`tx_h_debug_print`):
+```c
+nrc_dbg(NRC_DBG_TX, "TX: Data frame to %pM, len=%d, AC=%d", 
+        hdr->addr1, skb->len, ac);
+```
+
+#### 10.7.3 크레딧 모니터링
+
+**크레딧 상태 확인**:
+```bash
+# /proc/nrc/stats를 통한 실시간 모니터링
+cat /proc/nrc/stats
+# TX Credit: AC0=4, AC1=35, AC2=8, AC3=8
+# TX Pending: AC0=0, AC1=5, AC2=0, AC3=0
+```
+
+## 11. 결론
 
 NRC7292의 TX 경로는 다음과 같은 특징을 보입니다:
 
@@ -787,5 +1126,6 @@ NRC7292의 TX 경로는 다음과 같은 특징을 보입니다:
 4. **WIM 프로토콜**: 펌웨어와의 효율적 통신
 5. **CSPI 인터페이스**: SPI 기반 고속 데이터 전송
 6. **포괄적 에러 처리**: 각 단계별 안정성 확보
+7. **iperf 최적화**: 고성능 데이터 전송을 위한 배치 처리 및 AMPDU 지원
 
-이러한 구조는 IEEE 802.11ah HaLow의 특성인 저전력, 장거리 통신을 효과적으로 지원하며, 다양한 네트워크 토폴로지에서 안정적인 성능을 제공합니다.
+이러한 구조는 IEEE 802.11ah HaLow의 특성인 저전력, 장거리 통신을 효과적으로 지원하며, 다양한 네트워크 토폴로지에서 안정적인 성능을 제공합니다. 특히 iperf와 같은 성능 측정 도구에서 TCP/UDP 모두 효율적으로 처리할 수 있도록 설계되어 있습니다.

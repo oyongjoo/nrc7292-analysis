@@ -682,7 +682,346 @@ struct frame_hdr {
 - Hardware encryption support (`WIM_CIPHER_TYPE_*`)
 - Automatic AMPDU management
 
-## 10. Conclusion
+## 10. iperf TCP/UDP Transmission Scenario Analysis
+
+### 10.1 Scenario Overview
+
+Analysis of data transmission scenarios using iperf tool for real network performance measurement:
+
+```bash
+# TCP transmission test
+iperf3 -c 192.168.1.100 -t 30 -i 1
+
+# UDP transmission test  
+iperf3 -c 192.168.1.100 -u -b 10M -t 30 -i 1
+```
+
+### 10.2 TCP Data Transmission Flow Diagram
+
+```mermaid
+sequenceDiagram
+    participant App as iperf3 Application
+    participant Net as Network Stack
+    participant Mac as mac80211
+    participant NRC as NRC Driver
+    participant HIF as HIF Layer
+    participant FW as Firmware
+    participant HW as Hardware
+
+    Note over App,HW: TCP Data Transmission (e.g., 1460 bytes payload)
+    
+    App->>Net: write() system call
+    Net->>Net: TCP segmentation and IP header addition
+    Net->>Mac: dev_queue_xmit()
+    
+    Mac->>NRC: ieee80211_tx() call
+    Note over Mac,NRC: Passed from mac80211 framework to driver
+    
+    NRC->>NRC: nrc_mac_tx() [nrc-trx.c:75]
+    Note over NRC: TX entry point, structure initialization
+    
+    NRC->>NRC: VIF validity verification
+    NRC->>NRC: setup_ba_session() [nrc-trx.c:229]
+    Note over NRC: Automatic AMPDU BA session setup
+    
+    NRC->>NRC: TX handler chain execution
+    Note over NRC: Sequential handler processing
+    
+    NRC->>NRC: tx_h_debug_print() [nrc-trx.c:322]
+    NRC->>NRC: tx_h_debug_state() [nrc-trx.c:378]
+    NRC->>NRC: tx_h_put_iv() [nrc-trx.c:525]
+    Note over NRC: Add security IV header (when encrypted)
+    
+    NRC->>NRC: tx_h_put_qos_control() [nrc-trx.c:579]
+    Note over NRC: Convert Non-QoS → QoS data
+    
+    NRC->>NRC: Credit availability check
+    alt Credit sufficient
+        NRC->>HIF: nrc_xmit_frame() [hif.c:711]
+        Note over HIF: Add HIF header and Frame header
+        
+        HIF->>HIF: HIF header construction
+        Note over HIF: type=HIF_TYPE_FRAME, subtype=HIF_FRAME_SUB_DATA_BE
+        
+        HIF->>HIF: Frame header setup
+        Note over HIF: AC=BE(1), cipher, TLV info
+        
+        HIF->>HIF: Credit deduction
+        Note over HIF: atomic_add(credit, &nw->tx_pend[ac])
+        
+        HIF->>HIF: nrc_hif_enqueue() [hif.c:98]
+        Note over HIF: Insert into priority queue
+        
+        HIF->>HIF: nrc_hif_work() [hif.c:177]
+        Note over HIF: Workqueue-based sequential processing
+        
+        HIF->>HIF: nrc_hif_xmit() [nrc-hif-cspi.c:403]
+        Note over HIF: Transmit via CSPI interface
+        
+        HIF->>FW: C-SPI command transmission
+        Note over FW: [31:24]=0x50, [22]=1(write), [21]=0(inc), addr, len
+        
+        FW->>HW: Wireless frame transmission
+        Note over HW: IEEE 802.11ah frame
+        
+        HW-->>FW: TX completion interrupt
+        FW-->>HIF: WIM Credit Report
+        Note over FW,HIF: nrc_wim_update_tx_credit() [wim.c:695]
+        
+        HIF->>HIF: Credit restoration
+        Note over HIF: atomic_set(&nw->tx_credit[ac], report->ac[ac])
+        
+        HIF->>NRC: nrc_kick_txq() [nrc-mac80211.c:587]
+        Note over NRC: TX tasklet scheduling
+        
+        NRC->>NRC: nrc_tx_tasklet() [nrc-mac80211.c:545]
+        Note over NRC: Process pending packets
+        
+    else Credit insufficient
+        NRC->>NRC: Store packet in TXQ
+        Note over NRC: Wait until credit return
+    end
+```
+
+### 10.3 UDP Data Transmission Flow Diagram
+
+```mermaid
+sequenceDiagram
+    participant App as iperf3 Application
+    participant Net as Network Stack
+    participant Mac as mac80211
+    participant NRC as NRC Driver
+    participant HIF as HIF Layer
+    participant FW as Firmware
+    participant HW as Hardware
+
+    Note over App,HW: UDP Data Transmission (e.g., 1472 bytes payload)
+    
+    App->>Net: sendto() system call
+    Net->>Net: UDP header and IP header addition
+    Net->>Mac: dev_queue_xmit()
+    
+    Mac->>NRC: ieee80211_tx() call
+    Note over Mac,NRC: Passed from mac80211 framework to driver
+    
+    NRC->>NRC: nrc_mac_tx() [nrc-trx.c:75]
+    
+    alt AMPDU mode enabled
+        NRC->>NRC: setup_ba_session() [nrc-trx.c:229]
+        Note over NRC: UDP can also set BA session as it's QoS
+    end
+    
+    NRC->>NRC: TX handler chain execution
+    
+    NRC->>NRC: tx_h_put_qos_control() [nrc-trx.c:579]
+    Note over NRC: Convert UDP → QoS UDP, TID=0
+    
+    loop High-speed continuous transmission
+        NRC->>NRC: Credit check
+        alt Credit sufficient
+            NRC->>HIF: nrc_xmit_frame() [hif.c:711]
+            
+            HIF->>HIF: HIF header construction
+            Note over HIF: type=HIF_TYPE_FRAME, subtype=HIF_FRAME_SUB_DATA_BE
+            
+            HIF->>HIF: Frame header setup  
+            Note over HIF: AC=BE(1), no cipher (typically)
+            
+            HIF->>HIF: Credit deduction
+            Note over HIF: credit = DIV_ROUND_UP(skb->len, buffer_size)
+            
+            HIF->>FW: C-SPI burst transmission
+            Note over FW: [23]=1(burst), continuous packet transmission
+            
+            FW->>HW: Continuous wireless frame transmission
+            
+        else Credit insufficient
+            NRC->>NRC: TX tasklet wait
+            Note over NRC: Wait in queue until credit return
+            break
+        end
+    end
+    
+    Note over FW,HW: After batch transmission completion
+    HW-->>FW: Batch TX completion interrupt
+    FW-->>HIF: WIM Credit Report (batch)
+    Note over FW,HIF: Bulk credit return for multiple frames
+    
+    HIF->>HIF: Large credit restoration
+    HIF->>NRC: nrc_kick_txq()
+    NRC->>NRC: nrc_tx_tasklet()
+    Note over NRC: Process waiting packets continuously
+```
+
+### 10.4 TCP vs UDP Transmission Differences Analysis
+
+#### 10.4.1 Packet Size and Segmentation
+
+**TCP (Maximum Segment Size)**:
+```c
+// Typical TCP MSS: 1460 bytes (MTU 1500 - IP header 20 - TCP header 20)
+// HaLow MTU: Up to 2304 bytes (IEEE 802.11ah specification)
+// Actual payload: 1460 bytes
+```
+
+**UDP (User Datagram)**:
+```c
+// UDP maximum size: 65507 bytes (theoretical)
+// Actual transmission: iperf3 default 1472 bytes (MTU 1500 - IP header 20 - UDP header 8)
+// payload: 1472 bytes (12 bytes more than TCP)
+```
+
+#### 10.4.2 QoS and Priority Processing
+
+**Common Processing** (`tx_h_put_qos_control`):
+```c
+// Convert all data frames to QoS
+if (ieee80211_is_data(fc) && !ieee80211_is_data_qos(fc)) {
+    // Add QoS control field
+    hdr->frame_control |= cpu_to_le16(IEEE80211_STYPE_QOS_DATA);
+    *((u16 *)(skb->data + 24)) = 0;  // TID=0 (Best Effort)
+}
+```
+
+#### 10.4.3 AMPDU Block ACK Session
+
+**TCP Characteristics**:
+- Requires order guarantee
+- Built-in retransmission logic
+- High AMPDU aggregation effect
+
+**UDP Characteristics**:
+- Order independent
+- No retransmission
+- High throughput priority
+
+#### 10.4.4 Credit Consumption Pattern
+
+**TCP Credit Calculation**:
+```c
+// TCP packet (1460 + headers)
+skb->len = 1460 + 24 + 2 + 8 + 4;  // payload + 802.11 + QoS + LLC + FCS = 1498
+credit = DIV_ROUND_UP(1498, nw->fwinfo.buffer_size);  // typically 256 bytes
+// credit = DIV_ROUND_UP(1498, 256) = 6 credits
+```
+
+**UDP Credit Calculation**:
+```c
+// UDP packet (1472 + headers)  
+skb->len = 1472 + 24 + 2 + 8 + 4;  // payload + 802.11 + QoS + LLC + FCS = 1510
+credit = DIV_ROUND_UP(1510, 256) = 6 credits
+```
+
+### 10.5 Transmission Completion Confirmation Mechanism
+
+#### 10.5.1 Hardware Level Confirmation
+
+**C-SPI Transmission Completion**:
+```c
+// In nrc_hif_xmit() function
+ret = nrc_spi_write(hdev, skb->data, skb->len);
+if (ret < 0) {
+    nrc_hif_free_skb(nw, skb);  // Credit rollback
+    return ret;
+}
+// On success, successfully delivered to hardware queue
+```
+
+#### 10.5.2 Firmware Level Confirmation
+
+**Wireless Transmission Completion Event**:
+```c
+// wim.c:695 - nrc_wim_update_tx_credit()
+static int nrc_wim_update_tx_credit(struct nrc *nw, struct wim *wim)
+{
+    struct wim_credit_report *r = (void *)(wim + 1);
+    int ac;
+    
+    // Update credits for each AC
+    for (ac = 0; ac < (IEEE80211_NUM_ACS*3); ac++)
+        atomic_set(&nw->tx_credit[ac], r->v.ac[ac]);
+    
+    // Resume processing of pending packets
+    nrc_kick_txq(nw);
+    return 0;
+}
+```
+
+#### 10.5.3 Transmission Completion Confirmation Steps
+
+1. **SPI Transmission Complete**: Hardware queue arrival confirmation
+2. **Firmware Processing Complete**: Wireless frame generation completion  
+3. **Wireless Transmission Complete**: Actual air interface transmission completion
+4. **Credit Return**: Buffer space release, new transmission possible
+
+### 10.6 iperf Performance Optimization Elements
+
+#### 10.6.1 Batch Processing Optimization
+
+**Workqueue-based Batch Processing** (`nrc_hif_work`):
+```c
+// Sequential processing by priority queue
+for (i = ARRAY_SIZE(hdev->queue)-1; i >= 0; i--) {
+    for (;;) {
+        skb = skb_dequeue(&hdev->queue[i]);
+        if (!skb) break;
+        
+        ret = nrc_hif_xmit(hdev, skb);  // Continuous transmission
+    }
+}
+```
+
+#### 10.6.2 Credit-based Flow Control
+
+**Dynamic Credit Management**:
+- **BE(Best Effort)**: 40 credits (largest allocation)
+- **VI(Video)**: 8 credits
+- **VO(Voice)**: 8 credits  
+- **BK(Background)**: 4 credits
+
+#### 10.6.3 AMPDU Aggregation
+
+**Automatic BA Session Setup**:
+```c
+// In setup_ba_session()
+ret = ieee80211_start_tx_ba_session(peer_sta, tid, 0);
+// On success, aggregate multiple frames into one AMPDU for increased efficiency
+```
+
+### 10.7 Performance Monitoring and Debugging
+
+#### 10.7.1 Statistics Collection
+
+**TX Statistics** (`nrc-stats.c`):
+```c
+// Transmission statistics counters
+nw->stats.tx_packets++;
+nw->stats.tx_bytes += skb->len;
+
+// Per-AC transmission statistics
+nw->stats.tx_ac[ac].packets++;
+nw->stats.tx_ac[ac].bytes += skb->len;
+```
+
+#### 10.7.2 Debug Output
+
+**Per-frame Debug** (`tx_h_debug_print`):
+```c
+nrc_dbg(NRC_DBG_TX, "TX: Data frame to %pM, len=%d, AC=%d", 
+        hdr->addr1, skb->len, ac);
+```
+
+#### 10.7.3 Credit Monitoring
+
+**Credit Status Check**:
+```bash
+# Real-time monitoring via /proc/nrc/stats
+cat /proc/nrc/stats
+# TX Credit: AC0=4, AC1=35, AC2=8, AC3=8
+# TX Pending: AC0=0, AC1=5, AC2=0, AC3=0
+```
+
+## 11. Conclusion
 
 The TX path of NRC7292 demonstrates the following characteristics:
 
@@ -692,5 +1031,6 @@ The TX path of NRC7292 demonstrates the following characteristics:
 4. **WIM Protocol**: Efficient firmware communication
 5. **CSPI Interface**: SPI-based high-speed data transmission
 6. **Comprehensive Error Handling**: Stability assurance at each stage
+7. **iperf Optimization**: Batch processing and AMPDU support for high-performance data transmission
 
-This architecture effectively supports the characteristics of IEEE 802.11ah HaLow - low power and long-range communication - while providing stable performance across various network topologies.
+This architecture effectively supports the characteristics of IEEE 802.11ah HaLow - low power and long-range communication - while providing stable performance across various network topologies. Particularly, it is designed to efficiently handle both TCP and UDP in performance measurement tools like iperf.

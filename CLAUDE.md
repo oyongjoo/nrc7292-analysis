@@ -6,6 +6,36 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 This is the NRC7292 Software Package for Host mode (Linux OS) - a Linux kernel driver package for the NRC7292 HaLow (IEEE 802.11ah) chipset. The package provides a complete wireless networking solution including kernel driver, firmware, CLI application, and configuration scripts.
 
+## Git Configuration and Commit Guidelines
+
+**CRITICAL**: Always follow these Git settings when making commits:
+
+### Git User Configuration
+- **Author**: Liam Lee <oyongjoo@gmail.com>
+- **Repository**: oyongjoo/nrc7292-analysis
+- **Branch**: main
+
+### Commit Message Guidelines
+- **DO NOT** include "Generated with Claude Code" or similar AI attribution in commit messages
+- **DO NOT** include "Co-Authored-By: Claude" in commit messages
+- Keep commit messages professional and focused on the actual changes
+- Use conventional commit format when appropriate
+
+### Example of CORRECT commit message:
+```
+Add iperf TCP/UDP TX flow analysis
+
+- Updated tx_path_detailed.md and tx_path_detailed_ko.md with comprehensive iperf scenarios
+- Added detailed sequence diagrams for TCP and UDP transmission flows
+- Created new blog post: NRC7292 iperf TCP/UDP TX Flow Analysis
+```
+
+### Example of INCORRECT commit message:
+```
+🤖 Generated with [Claude Code](https://claude.ai/code)
+Co-Authored-By: Claude <noreply@anthropic.com>
+```
+
 ## Build Commands
 
 ### Kernel Driver

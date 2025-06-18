@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>NRC7292 iperf TCP/UDP TX Flow Analysis | NRC7292 Analysis Blog</title>
+    <link rel="stylesheet" href="/assets/css/style.css">
+</head>
+<body>
+    <header>
+        <h1><a href="/">NRC7292 Analysis Blog</a></h1>
+        <p>Code analysis and research documentation for NRC7292 HaLow driver</p>
+        <nav>
+            <a href="/">Home</a>
+            <a href="/posts/">All Posts</a>
+            <a href="https://github.com/oyongjoo/nrc7292-analysis">GitHub</a>
+        </nav>
+    </header>
+    <main>
+        <article>
+    <header>
+        <h1>NRC7292 iperf TCP/UDP TX Flow Analysis</h1>
+        <time datetime="2025-06-18T14:00:00+09:00">
+            June 18, 2025
+        </time>
+        
+        <div class="tags">
+            
+        </div>
+        
+        
+    </header>
+    <div class="content">
+        <h1 id="nrc7292-iperf-tcpudp-tx-flow-analysis">NRC7292 iperf TCP/UDP TX Flow Analysis</h1>
+
+<h2 id="overview">Overview</h2>
+
+<p>This post provides a comprehensive analysis of the NRC7292 HaLow driver’s TX (transmission) path when handling iperf TCP and UDP traffic. We’ll examine the complete data flow from application-level iperf commands down to the CSPI hardware interface, tracking each function call and transmission completion mechanism.</p>
+
+<h2 id="iperf-test-commands">iperf Test Commands</h2>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c"># TCP transmission test</span>
+iperf3 <span class="nt">-c</span> 192.168.1.100 <span class="nt">-t</span> 30 <span class="nt">-i</span> 1
+
+<span class="c"># UDP transmission test  </span>
+iperf3 <span class="nt">-c</span> 192.168.1.100 <span class="nt">-u</span> <span class="nt">-b</span> 10M <span class="nt">-t</span> 30 <span class="nt">-i</span> 1
+</code></pre></div></div>
+
+<h2 id="tcp-data-transmission-flow">TCP Data Transmission Flow</h2>
+
+<p>The following sequence diagram shows the complete TCP transmission flow through the NRC7292 driver:</p>
+
+<pre><code class="language-mermaid">sequenceDiagram
+    participant App as iperf3 Application
+    participant Net as Network Stack
+    participant Mac as mac80211
+    participant NRC as NRC Driver
+    participant HIF as HIF Layer
+    participant FW as Firmware
+    participant HW as Hardware
+
+    Note over App,HW: TCP Data Transmission (1460 bytes payload)
+    
+    App-&gt;&gt;Net: write() system call
+    Net-&gt;&gt;Net: TCP segmentation and IP header addition
+    Net-&gt;&gt;Mac: dev_queue_xmit()
+    
+    Mac-&gt;&gt;NRC: ieee80211_tx() call
+    Note over Mac,NRC: Passed from mac80211 framework to driver
+    
+    NRC-&gt;&gt;NRC: nrc_mac_tx() [nrc-trx.c:75]
+    Note over NRC: TX entry point, structure initialization
+    
+    NRC-&gt;&gt;NRC: setup_ba_session() [nrc-trx.c:229]
+    Note over NRC: Automatic AMPDU BA session setup
+    
+    NRC-&gt;&gt;NRC: TX handler chain execution
+    NRC-&gt;&gt;NRC: tx_h_put_qos_control() [nrc-trx.c:579]
+    Note over NRC: Convert Non-QoS → QoS data
+    
+    alt Credit sufficient
+        NRC-&gt;&gt;HIF: nrc_xmit_frame() [hif.c:711]
+        HIF-&gt;&gt;HIF: nrc_hif_enqueue() [hif.c:98]
+        HIF-&gt;&gt;HIF: nrc_hif_work() [hif.c:177]
+        HIF-&gt;&gt;HIF: nrc_hif_xmit() [nrc-hif-cspi.c:403]
+        
+        HIF-&gt;&gt;FW: C-SPI command transmission
+        FW-&gt;&gt;HW: IEEE 802.11ah frame transmission
+        
+        HW--&gt;&gt;FW: TX completion interrupt
+        FW--&gt;&gt;HIF: WIM Credit Report
+        HIF-&gt;&gt;NRC: nrc_kick_txq() [nrc-mac80211.c:587]
+        NRC-&gt;&gt;NRC: nrc_tx_tasklet() [nrc-mac80211.c:545]
+    else Credit insufficient
+        NRC-&gt;&gt;NRC: Store packet in TXQ
+    end
+</code></pre>
+
+<h2 id="udp-data-transmission-flow">UDP Data Transmission Flow</h2>
+
+<p>UDP transmission follows a similar path but with optimizations for high-throughput scenarios:</p>
+
+<pre><code class="language-mermaid">sequenceDiagram
+    participant App as iperf3 Application
+    participant Net as Network Stack
+    participant Mac as mac80211
+    participant NRC as NRC Driver
+    participant HIF as HIF Layer
+    participant FW as Firmware
+    participant HW as Hardware
+
+    Note over App,HW: UDP Data Transmission (1472 bytes payload)
+    
+    App-&gt;&gt;Net: sendto() system call
+    Net-&gt;&gt;Mac: dev_queue_xmit()
+    
+    Mac-&gt;&gt;NRC: ieee80211_tx() call
+    NRC-&gt;&gt;NRC: nrc_mac_tx() [nrc-trx.c:75]
+    NRC-&gt;&gt;NRC: tx_h_put_qos_control() [nrc-trx.c:579]
+    
+    loop High-speed continuous transmission
+        alt Credit sufficient
+            NRC-&gt;&gt;HIF: nrc_xmit_frame() [hif.c:711]
+            HIF-&gt;&gt;FW: C-SPI burst transmission
+            FW-&gt;&gt;HW: Continuous wireless frame transmission
+        else Credit insufficient
+            break
+        end
+    end
+    
+    Note over FW,HW: After batch transmission
+    HW--&gt;&gt;FW: Batch TX completion interrupt
+    FW--&gt;&gt;HIF: WIM Credit Report (batch)
+    HIF-&gt;&gt;NRC: nrc_kick_txq()
+</code></pre>
+
+<h2 id="key-differences-tcp-vs-udp">Key Differences: TCP vs UDP</h2>
+
+<h3 id="packet-size-analysis">Packet Size Analysis</h3>
+
+<p><strong>TCP Characteristics:</strong></p>
+<ul>
+  <li>Maximum Segment Size: 1460 bytes (MTU 1500 - IP 20 - TCP 20)</li>
+  <li>Total frame size: ~1498 bytes (+ 802.11 headers)</li>
+  <li>Credit consumption: 6 credits (DIV_ROUND_UP(1498, 256))</li>
+</ul>
+
+<p><strong>UDP Characteristics:</strong></p>
+<ul>
+  <li>Payload size: 1472 bytes (MTU 1500 - IP 20 - UDP 8)</li>
+  <li>Total frame size: ~1510 bytes (+ 802.11 headers)</li>
+  <li>Credit consumption: 6 credits (DIV_ROUND_UP(1510, 256))</li>
+</ul>
+
+<h3 id="qos-processing">QoS Processing</h3>
+
+<p>Both TCP and UDP data frames undergo the same QoS conversion:</p>
+
+<div class="language-c highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c1">// tx_h_put_qos_control() function</span>
+<span class="k">if</span> <span class="p">(</span><span class="n">ieee80211_is_data</span><span class="p">(</span><span class="n">fc</span><span class="p">)</span> <span class="o">&amp;&amp;</span> <span class="o">!</span><span class="n">ieee80211_is_data_qos</span><span class="p">(</span><span class="n">fc</span><span class="p">))</span> <span class="p">{</span>
+    <span class="n">hdr</span><span class="o">-&gt;</span><span class="n">frame_control</span> <span class="o">|=</span> <span class="n">cpu_to_le16</span><span class="p">(</span><span class="n">IEEE80211_STYPE_QOS_DATA</span><span class="p">);</span>
+    <span class="o">*</span><span class="p">((</span><span class="n">u16</span> <span class="o">*</span><span class="p">)(</span><span class="n">skb</span><span class="o">-&gt;</span><span class="n">data</span> <span class="o">+</span> <span class="mi">24</span><span class="p">))</span> <span class="o">=</span> <span class="mi">0</span><span class="p">;</span>  <span class="c1">// TID=0 (Best Effort)</span>
+<span class="p">}</span>
+</code></pre></div></div>
+
+<h3 id="ampdu-block-ack-sessions">AMPDU Block ACK Sessions</h3>
+
+<p><strong>TCP Benefits:</strong></p>
+<ul>
+  <li>Order guarantee requirements make AMPDU highly effective</li>
+  <li>Built-in retransmission complements Block ACK mechanism</li>
+  <li>High aggregation efficiency for continuous streams</li>
+</ul>
+
+<p><strong>UDP Benefits:</strong></p>
+<ul>
+  <li>No ordering requirements allow for optimized processing</li>
+  <li>Higher throughput potential due to no retransmission overhead</li>
+  <li>Efficient for real-time applications</li>
+</ul>
+
+<h2 id="transmission-completion-mechanism">Transmission Completion Mechanism</h2>
+
+<p>The driver employs a multi-stage completion confirmation system:</p>
+
+<h3 id="1-hardware-level-c-spi">1. Hardware Level (C-SPI)</h3>
+<div class="language-c highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c1">// nrc_hif_xmit() function</span>
+<span class="n">ret</span> <span class="o">=</span> <span class="n">nrc_spi_write</span><span class="p">(</span><span class="n">hdev</span><span class="p">,</span> <span class="n">skb</span><span class="o">-&gt;</span><span class="n">data</span><span class="p">,</span> <span class="n">skb</span><span class="o">-&gt;</span><span class="n">len</span><span class="p">);</span>
+<span class="k">if</span> <span class="p">(</span><span class="n">ret</span> <span class="o">&lt;</span> <span class="mi">0</span><span class="p">)</span> <span class="p">{</span>
+    <span class="n">nrc_hif_free_skb</span><span class="p">(</span><span class="n">nw</span><span class="p">,</span> <span class="n">skb</span><span class="p">);</span>  <span class="c1">// Credit rollback</span>
+    <span class="k">return</span> <span class="n">ret</span><span class="p">;</span>
+<span class="p">}</span>
+</code></pre></div></div>
+
+<h3 id="2-firmware-level-wim-credit-report">2. Firmware Level (WIM Credit Report)</h3>
+<div class="language-c highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c1">// nrc_wim_update_tx_credit() [wim.c:695]</span>
+<span class="k">static</span> <span class="kt">int</span> <span class="nf">nrc_wim_update_tx_credit</span><span class="p">(</span><span class="k">struct</span> <span class="n">nrc</span> <span class="o">*</span><span class="n">nw</span><span class="p">,</span> <span class="k">struct</span> <span class="n">wim</span> <span class="o">*</span><span class="n">wim</span><span class="p">)</span>
+<span class="p">{</span>
+    <span class="k">struct</span> <span class="n">wim_credit_report</span> <span class="o">*</span><span class="n">r</span> <span class="o">=</span> <span class="p">(</span><span class="kt">void</span> <span class="o">*</span><span class="p">)(</span><span class="n">wim</span> <span class="o">+</span> <span class="mi">1</span><span class="p">);</span>
+    
+    <span class="c1">// Update credits for each AC</span>
+    <span class="k">for</span> <span class="p">(</span><span class="n">ac</span> <span class="o">=</span> <span class="mi">0</span><span class="p">;</span> <span class="n">ac</span> <span class="o">&lt;</span> <span class="p">(</span><span class="n">IEEE80211_NUM_ACS</span><span class="o">*</span><span class="mi">3</span><span class="p">);</span> <span class="n">ac</span><span class="o">++</span><span class="p">)</span>
+        <span class="n">atomic_set</span><span class="p">(</span><span class="o">&amp;</span><span class="n">nw</span><span class="o">-&gt;</span><span class="n">tx_credit</span><span class="p">[</span><span class="n">ac</span><span class="p">],</span> <span class="n">r</span><span class="o">-&gt;</span><span class="n">v</span><span class="p">.</span><span class="n">ac</span><span class="p">[</span><span class="n">ac</span><span class="p">]);</span>
+    
+    <span class="n">nrc_kick_txq</span><span class="p">(</span><span class="n">nw</span><span class="p">);</span>  <span class="c1">// Resume pending packet processing</span>
+    <span class="k">return</span> <span class="mi">0</span><span class="p">;</span>
+<span class="p">}</span>
+</code></pre></div></div>
+
+<h3 id="3-completion-steps">3. Completion Steps</h3>
+<ol>
+  <li><strong>SPI Transmission Complete</strong>: Hardware queue arrival</li>
+  <li><strong>Firmware Processing Complete</strong>: Frame generation done</li>
+  <li><strong>Wireless Transmission Complete</strong>: Air interface transmission</li>
+  <li><strong>Credit Return</strong>: Buffer space release for new transmissions</li>
+</ol>
+
+<h2 id="performance-optimization-elements">Performance Optimization Elements</h2>
+
+<h3 id="credit-based-flow-control">Credit-Based Flow Control</h3>
+<ul>
+  <li><strong>BE (Best Effort)</strong>: 40 credits (largest allocation for data)</li>
+  <li><strong>VI (Video)</strong>: 8 credits</li>
+  <li><strong>VO (Voice)</strong>: 8 credits</li>
+  <li><strong>BK (Background)</strong>: 4 credits</li>
+</ul>
+
+<h3 id="batch-processing">Batch Processing</h3>
+<div class="language-c highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c1">// nrc_hif_work() - Sequential queue processing</span>
+<span class="k">for</span> <span class="p">(</span><span class="n">i</span> <span class="o">=</span> <span class="n">ARRAY_SIZE</span><span class="p">(</span><span class="n">hdev</span><span class="o">-&gt;</span><span class="n">queue</span><span class="p">)</span><span class="o">-</span><span class="mi">1</span><span class="p">;</span> <span class="n">i</span> <span class="o">&gt;=</span> <span class="mi">0</span><span class="p">;</span> <span class="n">i</span><span class="o">--</span><span class="p">)</span> <span class="p">{</span>
+    <span class="k">for</span> <span class="p">(;;)</span> <span class="p">{</span>
+        <span class="n">skb</span> <span class="o">=</span> <span class="n">skb_dequeue</span><span class="p">(</span><span class="o">&amp;</span><span class="n">hdev</span><span class="o">-&gt;</span><span class="n">queue</span><span class="p">[</span><span class="n">i</span><span class="p">]);</span>
+        <span class="k">if</span> <span class="p">(</span><span class="o">!</span><span class="n">skb</span><span class="p">)</span> <span class="k">break</span><span class="p">;</span>
+        <span class="n">ret</span> <span class="o">=</span> <span class="n">nrc_hif_xmit</span><span class="p">(</span><span class="n">hdev</span><span class="p">,</span> <span class="n">skb</span><span class="p">);</span>
+    <span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div></div>
+
+<h3 id="ampdu-aggregation">AMPDU Aggregation</h3>
+<p>Automatic Block ACK session setup enhances throughput:</p>
+<div class="language-c highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c1">// setup_ba_session()</span>
+<span class="n">ret</span> <span class="o">=</span> <span class="n">ieee80211_start_tx_ba_session</span><span class="p">(</span><span class="n">peer_sta</span><span class="p">,</span> <span class="n">tid</span><span class="p">,</span> <span class="mi">0</span><span class="p">);</span>
+</code></pre></div></div>
+
+<h2 id="performance-monitoring">Performance Monitoring</h2>
+
+<h3 id="real-time-statistics">Real-time Statistics</h3>
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c"># Monitor credit status</span>
+<span class="nb">cat</span> /proc/nrc/stats
+<span class="c"># TX Credit: AC0=4, AC1=35, AC2=8, AC3=8</span>
+<span class="c"># TX Pending: AC0=0, AC1=5, AC2=0, AC3=0</span>
+</code></pre></div></div>
+
+<h3 id="debug-information">Debug Information</h3>
+<div class="language-c highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c1">// Per-frame debugging</span>
+<span class="n">nrc_dbg</span><span class="p">(</span><span class="n">NRC_DBG_TX</span><span class="p">,</span> <span class="s">"TX: Data frame to %pM, len=%d, AC=%d"</span><span class="p">,</span> 
+        <span class="n">hdr</span><span class="o">-&gt;</span><span class="n">addr1</span><span class="p">,</span> <span class="n">skb</span><span class="o">-&gt;</span><span class="n">len</span><span class="p">,</span> <span class="n">ac</span><span class="p">);</span>
+</code></pre></div></div>
+
+<h2 id="conclusion">Conclusion</h2>
+
+<p>The NRC7292 HaLow driver’s TX path demonstrates sophisticated handling of both TCP and UDP traffic through iperf scenarios. Key architectural strengths include:</p>
+
+<ol>
+  <li><strong>Unified QoS Processing</strong>: Both protocols benefit from automatic QoS conversion</li>
+  <li><strong>Credit-Based Flow Control</strong>: Prevents buffer overflow while maintaining high throughput</li>
+  <li><strong>AMPDU Optimization</strong>: Automatic aggregation improves efficiency for both protocols</li>
+  <li><strong>Multi-Stage Completion</strong>: Reliable transmission confirmation through hardware and firmware layers</li>
+  <li><strong>Batch Processing</strong>: Optimized for high-performance scenarios like iperf testing</li>
+</ol>
+
+<p>This design effectively supports IEEE 802.11ah HaLow’s low-power, long-range characteristics while delivering the performance needed for throughput measurement tools and real-world applications.</p>
+
+<p>For detailed function-level analysis and complete source code references, see the <a href="/code_analysis/source_analysis/tx_path_detailed.md">full TX path documentation</a> in our analysis repository.</p>
+
+    </div>
+    <footer>
+        <div class="post-navigation">
+            
+                <a href="/2025/06/17/nrc7292-tx-path-analysis/" class="prev">← NRC7292 TX Path Detailed Analysis</a>
+            
+            
+        </div>
+    </footer>
+</article>
+    </main>
+    <footer>
+        <p>&copy; 2025 NRC7292 Analysis Blog - Code Analysis by Liam Lee</p>
+    </footer>
+</body>
+</html>
