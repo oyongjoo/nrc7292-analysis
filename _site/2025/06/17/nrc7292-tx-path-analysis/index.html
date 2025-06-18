@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>NRC7292 TX Path Detailed Analysis | NRC7292 Analysis Blog</title>
+    <link rel="stylesheet" href="/assets/css/style.css">
+</head>
+<body>
+    <header>
+        <h1><a href="/">NRC7292 Analysis Blog</a></h1>
+        <p>Code analysis and research documentation for NRC7292 HaLow driver</p>
+        <nav>
+            <a href="/">Home</a>
+            <a href="/posts/">All Posts</a>
+            <a href="https://github.com/oyongjoo/nrc7292-analysis">GitHub</a>
+        </nav>
+    </header>
+    <main>
+        <article>
+    <header>
+        <h1>NRC7292 TX Path Detailed Analysis</h1>
+        <time datetime="2025-06-17T00:00:00+09:00">
+            June 17, 2025
+        </time>
+        
+        <div class="tags">
+            
+                <span class="tag">tx-path</span>
+            
+                <span class="tag">tasklet</span>
+            
+                <span class="tag">credit-system</span>
+            
+                <span class="tag">ampdu</span>
+            
+                <span class="tag">source-code</span>
+            
+        </div>
+        
+        
+        <div class="category">
+            Category: <span class="category-name">Architecture</span>
+        </div>
+        
+    </header>
+    <div class="content">
+        <h1 id="nrc7292-tx-path-detailed-analysis">NRC7292 TX Path Detailed Analysis</h1>
+
+<p>This post provides a comprehensive analysis of the TX (transmission) path in the NRC7292 HaLow (IEEE 802.11ah) driver, covering the entire data flow from mac80211 kernel framework to hardware transmission.</p>
+
+<h2 id="tx-entry-point-nrc_mac_tx-function">TX Entry Point: <code class="language-plaintext highlighter-rouge">nrc_mac_tx</code> Function</h2>
+
+<p>The TX path begins at <code class="language-plaintext highlighter-rouge">nrc_mac_tx</code> function in <code class="language-plaintext highlighter-rouge">nrc-trx.c</code>:</p>
+
+<div class="language-c highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="cp">#ifdef CONFIG_SUPPORT_NEW_MAC_TX
+</span><span class="kt">void</span> <span class="n">nrc_mac_tx</span><span class="p">(</span><span class="k">struct</span> <span class="n">ieee80211_hw</span> <span class="o">*</span><span class="n">hw</span><span class="p">,</span> <span class="k">struct</span> <span class="n">ieee80211_tx_control</span> <span class="o">*</span><span class="n">control</span><span class="p">,</span>
+        <span class="k">struct</span> <span class="n">sk_buff</span> <span class="o">*</span><span class="n">skb</span><span class="p">)</span>
+<span class="cp">#else
+</span><span class="kt">void</span> <span class="n">nrc_mac_tx</span><span class="p">(</span><span class="k">struct</span> <span class="n">ieee80211_hw</span> <span class="o">*</span><span class="n">hw</span><span class="p">,</span>
+        <span class="k">struct</span> <span class="n">sk_buff</span> <span class="o">*</span><span class="n">skb</span><span class="p">)</span>
+<span class="cp">#endif
+</span></code></pre></div></div>
+
+<h3 id="parameter-analysis">Parameter Analysis</h3>
+
+<ul>
+  <li><strong><code class="language-plaintext highlighter-rouge">ieee80211_hw *hw</code></strong>: mac80211 hardware abstraction providing driver context via <code class="language-plaintext highlighter-rouge">hw-&gt;priv</code></li>
+  <li><strong><code class="language-plaintext highlighter-rouge">ieee80211_tx_control *control</code></strong>: TX control information for newer kernel versions</li>
+  <li><strong><code class="language-plaintext highlighter-rouge">sk_buff *skb</code></strong>: Packet data containing IEEE 802.11 frame with metadata via <code class="language-plaintext highlighter-rouge">IEEE80211_SKB_CB(skb)</code></li>
+</ul>
+
+<h2 id="tx-tasklet-mechanism">TX Tasklet Mechanism</h2>
+
+<h3 id="initialization">Initialization</h3>
+
+<p>The TX tasklet is configured during driver initialization (<code class="language-plaintext highlighter-rouge">nrc-init.c:816-822</code>):</p>
+
+<div class="language-c highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="cp">#ifdef CONFIG_USE_TXQ
+#ifdef CONFIG_NEW_TASKLET_API
+</span>    <span class="n">tasklet_setup</span><span class="p">(</span><span class="o">&amp;</span><span class="n">nw</span><span class="o">-&gt;</span><span class="n">tx_tasklet</span><span class="p">,</span> <span class="n">nrc_tx_tasklet</span><span class="p">);</span>
+<span class="cp">#else
+</span>    <span class="n">tasklet_init</span><span class="p">(</span><span class="o">&amp;</span><span class="n">nw</span><span class="o">-&gt;</span><span class="n">tx_tasklet</span><span class="p">,</span> <span class="n">nrc_tx_tasklet</span><span class="p">,</span> <span class="p">(</span><span class="kt">unsigned</span> <span class="kt">long</span><span class="p">)</span> <span class="n">nw</span><span class="p">);</span>
+<span class="cp">#endif
+#endif
+</span></code></pre></div></div>
+
+<p><strong>Kernel API Compatibility:</strong></p>
+<ul>
+  <li><code class="language-plaintext highlighter-rouge">tasklet_setup()</code>: New kernel API (5.0+) with type safety</li>
+  <li><code class="language-plaintext highlighter-rouge">tasklet_init()</code>: Legacy API using unsigned long parameter</li>
+</ul>
+
+<h3 id="implementation">Implementation</h3>
+
+<p>The TX tasklet provides bottom-half processing for sequential packet transmission:</p>
+
+<div class="language-c highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="kt">void</span> <span class="nf">nrc_tx_tasklet</span><span class="p">(</span><span class="k">struct</span> <span class="n">tasklet_struct</span> <span class="o">*</span><span class="n">t</span><span class="p">)</span>
+<span class="p">{</span>
+    <span class="k">struct</span> <span class="n">nrc</span> <span class="o">*</span><span class="n">nw</span> <span class="o">=</span> <span class="n">from_tasklet</span><span class="p">(</span><span class="n">nw</span><span class="p">,</span> <span class="n">t</span><span class="p">,</span> <span class="n">tx_tasklet</span><span class="p">);</span>
+    <span class="k">struct</span> <span class="n">nrc_txq</span> <span class="o">*</span><span class="n">ntxq</span><span class="p">,</span> <span class="o">*</span><span class="n">tmp</span><span class="p">;</span>
+    <span class="kt">int</span> <span class="n">ret</span><span class="p">;</span>
+
+    <span class="n">spin_lock_bh</span><span class="p">(</span><span class="o">&amp;</span><span class="n">nw</span><span class="o">-&gt;</span><span class="n">txq_lock</span><span class="p">);</span>
+
+    <span class="n">list_for_each_entry_safe</span><span class="p">(</span><span class="n">ntxq</span><span class="p">,</span> <span class="n">tmp</span><span class="p">,</span> <span class="o">&amp;</span><span class="n">nw</span><span class="o">-&gt;</span><span class="n">txq</span><span class="p">,</span> <span class="n">list</span><span class="p">)</span> <span class="p">{</span>
+        <span class="n">ret</span> <span class="o">=</span> <span class="n">nrc_push_txq</span><span class="p">(</span><span class="n">nw</span><span class="p">,</span> <span class="n">ntxq</span><span class="p">);</span>
+        <span class="k">if</span> <span class="p">(</span><span class="n">ret</span> <span class="o">==</span> <span class="mi">0</span><span class="p">)</span> <span class="p">{</span>
+            <span class="n">list_del_init</span><span class="p">(</span><span class="o">&amp;</span><span class="n">ntxq</span><span class="o">-&gt;</span><span class="n">list</span><span class="p">);</span>  <span class="c1">// All packets sent</span>
+        <span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+            <span class="n">list_move_tail</span><span class="p">(</span><span class="o">&amp;</span><span class="n">ntxq</span><span class="o">-&gt;</span><span class="n">list</span><span class="p">,</span> <span class="o">&amp;</span><span class="n">nw</span><span class="o">-&gt;</span><span class="n">txq</span><span class="p">);</span>  <span class="c1">// Round-robin</span>
+            <span class="k">break</span><span class="p">;</span>
+        <span class="p">}</span>
+    <span class="p">}</span>
+
+    <span class="n">spin_unlock_bh</span><span class="p">(</span><span class="o">&amp;</span><span class="n">nw</span><span class="o">-&gt;</span><span class="n">txq_lock</span><span class="p">);</span>
+<span class="p">}</span>
+</code></pre></div></div>
+
+<p><strong>Key Features:</strong></p>
+<ol>
+  <li><strong>Round-robin Scheduling</strong>: Fair processing between TXQs</li>
+  <li><strong>Spinlock Protection</strong>: Concurrency control with <code class="language-plaintext highlighter-rouge">txq_lock</code></li>
+  <li><strong>Credit-aware Processing</strong>: Stops when hardware buffers full</li>
+</ol>
+
+<h2 id="credit-based-flow-control">Credit-Based Flow Control</h2>
+
+<h3 id="credit-calculation">Credit Calculation</h3>
+
+<p>NRC7292 uses a sophisticated credit system for hardware buffer management:</p>
+
+<div class="language-c highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="n">credit</span> <span class="o">=</span> <span class="n">DIV_ROUND_UP</span><span class="p">(</span><span class="n">skb</span><span class="o">-&gt;</span><span class="n">len</span><span class="p">,</span> <span class="n">nw</span><span class="o">-&gt;</span><span class="n">fwinfo</span><span class="p">.</span><span class="n">buffer_size</span><span class="p">);</span>
+</code></pre></div></div>
+
+<h3 id="per-ac-credit-allocation">Per-AC Credit Allocation</h3>
+
+<div class="language-c highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="cp">#define CREDIT_AC0      (TCN*2+TCNE)    </span><span class="cm">/* BK (4) */</span><span class="cp">
+#define CREDIT_AC1      (TCN*20+TCNE)   </span><span class="cm">/* BE (40) */</span><span class="cp">
+#define CREDIT_AC2      (TCN*4+TCNE)    </span><span class="cm">/* VI (8) */</span><span class="cp">
+#define CREDIT_AC3      (TCN*4+TCNE)    </span><span class="cm">/* VO (8) */</span><span class="cp">
+</span></code></pre></div></div>
+
+<h3 id="credit-update-mechanism">Credit Update Mechanism</h3>
+
+<p>Firmware reports credit availability via WIM messages:</p>
+
+<div class="language-c highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">static</span> <span class="kt">int</span> <span class="nf">nrc_wim_update_tx_credit</span><span class="p">(</span><span class="k">struct</span> <span class="n">nrc</span> <span class="o">*</span><span class="n">nw</span><span class="p">,</span> <span class="k">struct</span> <span class="n">wim</span> <span class="o">*</span><span class="n">wim</span><span class="p">)</span>
+<span class="p">{</span>
+    <span class="k">struct</span> <span class="n">wim_credit_report</span> <span class="o">*</span><span class="n">r</span> <span class="o">=</span> <span class="p">(</span><span class="kt">void</span> <span class="o">*</span><span class="p">)(</span><span class="n">wim</span> <span class="o">+</span> <span class="mi">1</span><span class="p">);</span>
+    <span class="kt">int</span> <span class="n">ac</span><span class="p">;</span>
+    
+    <span class="k">for</span> <span class="p">(</span><span class="n">ac</span> <span class="o">=</span> <span class="mi">0</span><span class="p">;</span> <span class="n">ac</span> <span class="o">&lt;</span> <span class="p">(</span><span class="n">IEEE80211_NUM_ACS</span><span class="o">*</span><span class="mi">3</span><span class="p">);</span> <span class="n">ac</span><span class="o">++</span><span class="p">)</span>
+        <span class="n">atomic_set</span><span class="p">(</span><span class="o">&amp;</span><span class="n">nw</span><span class="o">-&gt;</span><span class="n">tx_credit</span><span class="p">[</span><span class="n">ac</span><span class="p">],</span> <span class="n">r</span><span class="o">-&gt;</span><span class="n">v</span><span class="p">.</span><span class="n">ac</span><span class="p">[</span><span class="n">ac</span><span class="p">]);</span>
+    
+    <span class="n">nrc_kick_txq</span><span class="p">(</span><span class="n">nw</span><span class="p">);</span>  <span class="c1">// Schedule tasklet</span>
+    <span class="k">return</span> <span class="mi">0</span><span class="p">;</span>
+<span class="p">}</span>
+</code></pre></div></div>
+
+<h2 id="ampdu-block-ack-session-management">AMPDU Block ACK Session Management</h2>
+
+<h3 id="automatic-ba-session-setup">Automatic BA Session Setup</h3>
+
+<p>The <code class="language-plaintext highlighter-rouge">setup_ba_session()</code> function manages automatic AMPDU establishment:</p>
+
+<div class="language-c highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">static</span> <span class="kt">void</span> <span class="nf">setup_ba_session</span><span class="p">(</span><span class="k">struct</span> <span class="n">nrc</span> <span class="o">*</span><span class="n">nw</span><span class="p">,</span> <span class="k">struct</span> <span class="n">ieee80211_vif</span> <span class="o">*</span><span class="n">vif</span><span class="p">,</span> <span class="k">struct</span> <span class="n">sk_buff</span> <span class="o">*</span><span class="n">skb</span><span class="p">)</span>
+<span class="p">{</span>
+    <span class="k">struct</span> <span class="n">ieee80211_sta</span> <span class="o">*</span><span class="n">peer_sta</span> <span class="o">=</span> <span class="nb">NULL</span><span class="p">;</span>
+    <span class="k">struct</span> <span class="n">nrc_sta</span> <span class="o">*</span><span class="n">i_sta</span> <span class="o">=</span> <span class="nb">NULL</span><span class="p">;</span>
+    <span class="k">struct</span> <span class="n">ieee80211_hdr</span> <span class="o">*</span><span class="n">qmh</span> <span class="o">=</span> <span class="p">(</span><span class="k">struct</span> <span class="n">ieee80211_hdr</span> <span class="o">*</span><span class="p">)</span> <span class="n">skb</span><span class="o">-&gt;</span><span class="n">data</span><span class="p">;</span>
+    <span class="kt">int</span> <span class="n">tid</span> <span class="o">=</span> <span class="o">*</span><span class="n">ieee80211_get_qos_ctl</span><span class="p">(</span><span class="n">qmh</span><span class="p">)</span> <span class="o">&amp;</span> <span class="n">IEEE80211_QOS_CTL_TID_MASK</span><span class="p">;</span>
+    
+    <span class="c1">// 1. Fragmentation check</span>
+    <span class="k">if</span> <span class="p">(</span><span class="n">nw</span><span class="o">-&gt;</span><span class="n">frag_threshold</span> <span class="o">!=</span> <span class="o">-</span><span class="mi">1</span><span class="p">)</span> <span class="k">return</span><span class="p">;</span>
+    
+    <span class="c1">// 2. TID validation</span>
+    <span class="k">if</span> <span class="p">(</span><span class="n">tid</span> <span class="o">&lt;</span> <span class="mi">0</span> <span class="o">||</span> <span class="n">tid</span> <span class="o">&gt;=</span> <span class="n">NRC_MAX_TID</span><span class="p">)</span> <span class="k">return</span><span class="p">;</span>
+    
+    <span class="c1">// 3. Find destination station</span>
+    <span class="n">peer_sta</span> <span class="o">=</span> <span class="n">ieee80211_find_sta</span><span class="p">(</span><span class="n">vif</span><span class="p">,</span> <span class="n">qmh</span><span class="o">-&gt;</span><span class="n">addr1</span><span class="p">);</span>
+    <span class="k">if</span> <span class="p">(</span><span class="o">!</span><span class="n">peer_sta</span><span class="p">)</span> <span class="k">return</span><span class="p">;</span>
+    
+    <span class="c1">// 4. Get NRC station context</span>
+    <span class="n">i_sta</span> <span class="o">=</span> <span class="n">to_i_sta</span><span class="p">(</span><span class="n">peer_sta</span><span class="p">);</span>
+    <span class="k">if</span> <span class="p">(</span><span class="o">!</span><span class="n">i_sta</span><span class="p">)</span> <span class="k">return</span><span class="p">;</span>
+    
+    <span class="c1">// 5. State machine handling</span>
+    <span class="k">switch</span> <span class="p">(</span><span class="n">i_sta</span><span class="o">-&gt;</span><span class="n">tx_ba_session</span><span class="p">[</span><span class="n">tid</span><span class="p">])</span> <span class="p">{</span>
+        <span class="k">case</span> <span class="n">IEEE80211_BA_NONE</span><span class="p">:</span>
+        <span class="k">case</span> <span class="n">IEEE80211_BA_CLOSE</span><span class="p">:</span>
+            <span class="n">ret</span> <span class="o">=</span> <span class="n">ieee80211_start_tx_ba_session</span><span class="p">(</span><span class="n">peer_sta</span><span class="p">,</span> <span class="n">tid</span><span class="p">,</span> <span class="mi">0</span><span class="p">);</span>
+            <span class="k">break</span><span class="p">;</span>
+        <span class="k">case</span> <span class="n">IEEE80211_BA_REJECT</span><span class="p">:</span>
+            <span class="c1">// Retry after 5 seconds</span>
+            <span class="k">if</span> <span class="p">(</span><span class="n">jiffies_to_msecs</span><span class="p">(</span><span class="n">jiffies</span> <span class="o">-</span> <span class="n">i_sta</span><span class="o">-&gt;</span><span class="n">ba_req_last_jiffies</span><span class="p">[</span><span class="n">tid</span><span class="p">])</span> <span class="o">&gt;</span> <span class="mi">5000</span><span class="p">)</span> <span class="p">{</span>
+                <span class="n">i_sta</span><span class="o">-&gt;</span><span class="n">tx_ba_session</span><span class="p">[</span><span class="n">tid</span><span class="p">]</span> <span class="o">=</span> <span class="n">IEEE80211_BA_NONE</span><span class="p">;</span>
+            <span class="p">}</span>
+            <span class="k">break</span><span class="p">;</span>
+    <span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div></div>
+
+<h2 id="drv_priv-structure-analysis">drv_priv Structure Analysis</h2>
+
+<h3 id="the-to_i_sta-macro">The <code class="language-plaintext highlighter-rouge">to_i_sta()</code> Macro</h3>
+
+<div class="language-c highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="cp">#define to_i_sta(s) ((struct nrc_sta *) (s)-&gt;drv_priv)
+</span></code></pre></div></div>
+
+<h3 id="nrc-station-structure">NRC Station Structure</h3>
+
+<div class="language-c highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">struct</span> <span class="n">nrc_sta</span> <span class="p">{</span>
+    <span class="k">struct</span> <span class="n">nrc</span> <span class="o">*</span><span class="n">nw</span><span class="p">;</span>                              <span class="c1">// Driver context</span>
+    <span class="k">struct</span> <span class="n">ieee80211_vif</span> <span class="o">*</span><span class="n">vif</span><span class="p">;</span>                   <span class="c1">// Connected VIF</span>
+    
+    <span class="k">enum</span> <span class="n">ieee80211_sta_state</span> <span class="n">state</span><span class="p">;</span>              <span class="c1">// STA state</span>
+    <span class="k">struct</span> <span class="n">list_head</span> <span class="n">list</span><span class="p">;</span>                       <span class="c1">// List connection</span>
+    
+    <span class="cm">/* Security keys */</span>
+    <span class="k">struct</span> <span class="n">ieee80211_key_conf</span> <span class="o">*</span><span class="n">ptk</span><span class="p">;</span>              <span class="c1">// Pairwise key</span>
+    <span class="k">struct</span> <span class="n">ieee80211_key_conf</span> <span class="o">*</span><span class="n">gtk</span><span class="p">;</span>              <span class="c1">// Group key</span>
+    
+    <span class="cm">/* Power management */</span>
+    <span class="kt">uint16_t</span> <span class="n">listen_interval</span><span class="p">;</span>
+    <span class="k">struct</span> <span class="n">nrc_max_idle</span> <span class="n">max_idle</span><span class="p">;</span>
+    
+    <span class="cm">/* Per-TID Block ACK sessions */</span>
+    <span class="k">enum</span> <span class="n">ieee80211_tx_ba_state</span> <span class="n">tx_ba_session</span><span class="p">[</span><span class="n">NRC_MAX_TID</span><span class="p">];</span>
+    <span class="kt">uint32_t</span> <span class="n">ba_req_last_jiffies</span><span class="p">[</span><span class="n">NRC_MAX_TID</span><span class="p">];</span>
+    <span class="k">struct</span> <span class="n">rx_ba_session</span> <span class="n">rx_ba_session</span><span class="p">[</span><span class="n">NRC_MAX_TID</span><span class="p">];</span>
+<span class="p">};</span>
+</code></pre></div></div>
+
+<h3 id="memory-layout">Memory Layout</h3>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>[ieee80211_sta structure][struct nrc_sta (drv_priv)]
+                         ↑
+                         sta-&gt;drv_priv points here
+</code></pre></div></div>
+
+<h2 id="tx-handler-chain">TX Handler Chain</h2>
+
+<p>The TX path uses a modular handler chain defined at compile time:</p>
+
+<div class="language-c highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="cp">#define TXH(fn, mask)                   \
+    static struct nrc_trx_handler __txh_ ## fn \
+    __attribute((__section__("nrc.txh"))) = {  \
+        .handler = fn,              \
+        .vif_types = mask,          \
+    }
+</span></code></pre></div></div>
+
+<h3 id="major-tx-handlers">Major TX Handlers</h3>
+
+<ol>
+  <li><strong><code class="language-plaintext highlighter-rouge">tx_h_debug_print</code></strong>: Debug output (conditional)</li>
+  <li><strong><code class="language-plaintext highlighter-rouge">tx_h_debug_state</code></strong>: Station state verification</li>
+  <li><strong><code class="language-plaintext highlighter-rouge">tx_h_frame_filter</code></strong>: Frame type filtering</li>
+  <li><strong><code class="language-plaintext highlighter-rouge">tx_h_put_iv</code></strong>: Security IV header addition</li>
+  <li><strong><code class="language-plaintext highlighter-rouge">tx_h_put_qos_control</code></strong>: QoS control field management</li>
+</ol>
+
+<h2 id="hardware-transmission">Hardware Transmission</h2>
+
+<h3 id="hif-header-construction">HIF Header Construction</h3>
+
+<div class="language-c highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="n">hif</span> <span class="o">=</span> <span class="p">(</span><span class="kt">void</span> <span class="o">*</span><span class="p">)</span><span class="n">skb_push</span><span class="p">(</span><span class="n">skb</span><span class="p">,</span> <span class="n">nw</span><span class="o">-&gt;</span><span class="n">fwinfo</span><span class="p">.</span><span class="n">tx_head_size</span><span class="p">);</span>
+<span class="n">memset</span><span class="p">(</span><span class="n">hif</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="n">nw</span><span class="o">-&gt;</span><span class="n">fwinfo</span><span class="p">.</span><span class="n">tx_head_size</span><span class="p">);</span>
+<span class="n">hif</span><span class="o">-&gt;</span><span class="n">type</span> <span class="o">=</span> <span class="n">HIF_TYPE_FRAME</span><span class="p">;</span>
+<span class="n">hif</span><span class="o">-&gt;</span><span class="n">len</span> <span class="o">=</span> <span class="n">skb</span><span class="o">-&gt;</span><span class="n">len</span> <span class="o">-</span> <span class="k">sizeof</span><span class="p">(</span><span class="o">*</span><span class="n">hif</span><span class="p">);</span>
+<span class="n">hif</span><span class="o">-&gt;</span><span class="n">vifindex</span> <span class="o">=</span> <span class="n">vif_index</span><span class="p">;</span>
+</code></pre></div></div>
+
+<h3 id="cspi-interface">CSPI Interface</h3>
+
+<p>The Custom SPI (CSPI) protocol handles actual hardware transmission:</p>
+
+<div class="language-c highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="cm">/*
+ * [31:24]: start byte (0x50)
+ * [23:23]: burst (0: single, 1: burst)  
+ * [22:22]: direction (0: read, 1: write)
+ * [21:21]: fixed (0: incremental, 1: fixed)
+ * [20:13]: address
+ * [12:0]: length
+ */</span>
+<span class="cp">#define C_SPI_WRITE     0x50400000
+#define C_SPI_BURST     0x00800000
+</span></code></pre></div></div>
+
+<h2 id="performance-optimizations">Performance Optimizations</h2>
+
+<h3 id="zero-copy-processing">Zero-Copy Processing</h3>
+<ul>
+  <li>Efficient header addition using <code class="language-plaintext highlighter-rouge">skb_push()</code> and <code class="language-plaintext highlighter-rouge">skb_put()</code></li>
+  <li>Minimal memory copying through SKB headroom utilization</li>
+</ul>
+
+<h3 id="batch-processing">Batch Processing</h3>
+<ul>
+  <li>Workqueue-based sequential transmission</li>
+  <li>Priority-based queue processing for QoS</li>
+</ul>
+
+<h3 id="hardware-acceleration">Hardware Acceleration</h3>
+<ul>
+  <li>Firmware-level encryption support</li>
+  <li>Automatic AMPDU aggregation management</li>
+</ul>
+
+<h2 id="conclusion">Conclusion</h2>
+
+<p>The NRC7292 TX path demonstrates a sophisticated architecture optimized for HaLow’s IoT requirements:</p>
+
+<ol>
+  <li><strong>Efficient Tasklet Processing</strong>: Bottom-half processing with round-robin fairness</li>
+  <li><strong>Credit-Based Flow Control</strong>: Hardware buffer overflow prevention</li>
+  <li><strong>Automatic AMPDU Management</strong>: Intelligent Block ACK session handling</li>
+  <li><strong>Modular Handler Chain</strong>: Flexible processing pipeline</li>
+  <li><strong>Zero-Copy Optimization</strong>: High-performance packet processing</li>
+</ol>
+
+<p>This architecture effectively supports IEEE 802.11ah characteristics of low power, long range, and high device density while maintaining stability and performance across various network scenarios.</p>
+
+<hr />
+
+<p><em>This analysis is based on comprehensive source code review of the NRC7292 Linux kernel driver. For complete technical details, refer to the <a href="https://github.com/oyongjoo/nrc7292-analysis">source code analysis documentation</a>.</em></p>
+
+    </div>
+    <footer>
+        <div class="post-navigation">
+            
+                <a href="/2025/06/17/nrc7292-mesh-networking/" class="prev">← NRC7292 HaLow Mesh Networking Implementation</a>
+            
+            
+        </div>
+    </footer>
+</article>
+    </main>
+    <footer>
+        <p>&copy; 2025 NRC7292 Analysis Blog - Code Analysis by Liam Lee</p>
+    </footer>
+</body>
+</html>

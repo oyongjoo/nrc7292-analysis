@@ -1,0 +1,1109 @@
+<?xml version="1.0" encoding="utf-8"?><feed xmlns="http://www.w3.org/2005/Atom" ><generator uri="https://jekyllrb.com/" version="4.4.1">Jekyll</generator><link href="http://0.0.0.0:4000/feed.xml" rel="self" type="application/atom+xml" /><link href="http://0.0.0.0:4000/" rel="alternate" type="text/html" /><updated>2025-06-18T13:44:13+09:00</updated><id>http://0.0.0.0:4000/feed.xml</id><title type="html">NRC7292 Analysis Blog</title><subtitle>Code analysis and research documentation for NRC7292 HaLow driver</subtitle><entry><title type="html">NRC7292 HaLow Driver Architecture Overview</title><link href="http://0.0.0.0:4000/2025/06/17/nrc7292-architecture-overview/" rel="alternate" type="text/html" title="NRC7292 HaLow Driver Architecture Overview" /><published>2025-06-17T00:00:00+09:00</published><updated>2025-06-17T00:00:00+09:00</updated><id>http://0.0.0.0:4000/2025/06/17/nrc7292-architecture-overview</id><content type="html" xml:base="http://0.0.0.0:4000/2025/06/17/nrc7292-architecture-overview/"><![CDATA[<h1 id="nrc7292-halow-driver-architecture-overview">NRC7292 HaLow Driver Architecture Overview</h1>
+
+<p>The NRC7292 is a comprehensive Linux kernel driver package for the IEEE 802.11ah HaLow chipset, designed specifically for IoT applications requiring long-range, low-power wireless connectivity.</p>
+
+<h2 id="overall-architecture">Overall Architecture</h2>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>┌─────────────────────────────────────────────────────────────┐
+│                    User Space Applications                   │
+├─────────────────────────────────────────────────────────────┤
+│                     mac80211 Framework                      │
+├─────────────────────────────────────────────────────────────┤
+│                    NRC7292 Driver Core                      │
+│  ┌───────────────┬─────────────────┬─────────────────────┐  │
+│  │  mac80211     │      WIM        │    Power Mgmt       │  │
+│  │  Interface    │    Protocol     │    &amp; Control        │  │
+│  └───────────────┼─────────────────┼─────────────────────┤  │
+│  │      TX/RX Processing Path      │   Hardware Abstraction│  │
+│  └─────────────────────────────────┼─────────────────────┘  │
+├─────────────────────────────────────┼─────────────────────────┤
+│                HIF (Hardware Interface)                     │
+├─────────────────────────────────────────────────────────────┤
+│                  CSPI (Custom SPI)                          │
+├─────────────────────────────────────────────────────────────┤
+│                    NRC7292 Firmware                        │
+└─────────────────────────────────────────────────────────────┘
+</code></pre></div></div>
+
+<h2 id="core-components">Core Components</h2>
+
+<h3 id="1-mac80211-integration-layer">1. mac80211 Integration Layer</h3>
+
+<p><strong>File</strong>: <code class="language-plaintext highlighter-rouge">nrc-mac80211.c/h</code></p>
+
+<p>The mac80211 interface layer bridges the Linux wireless framework with NRC-specific functionality:</p>
+
+<div class="language-c highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">static</span> <span class="k">const</span> <span class="k">struct</span> <span class="n">ieee80211_ops</span> <span class="n">nrc_ops</span> <span class="o">=</span> <span class="p">{</span>
+    <span class="p">.</span><span class="n">tx</span>                 <span class="o">=</span> <span class="n">nrc_mac_tx</span><span class="p">,</span>
+    <span class="p">.</span><span class="n">start</span>              <span class="o">=</span> <span class="n">nrc_mac_start</span><span class="p">,</span>
+    <span class="p">.</span><span class="n">stop</span>               <span class="o">=</span> <span class="n">nrc_mac_stop</span><span class="p">,</span>
+    <span class="p">.</span><span class="n">add_interface</span>      <span class="o">=</span> <span class="n">nrc_mac_add_interface</span><span class="p">,</span>
+    <span class="p">.</span><span class="n">remove_interface</span>   <span class="o">=</span> <span class="n">nrc_mac_remove_interface</span><span class="p">,</span>
+    <span class="p">.</span><span class="n">config</span>             <span class="o">=</span> <span class="n">nrc_mac_config</span><span class="p">,</span>
+    <span class="p">.</span><span class="n">bss_info_changed</span>   <span class="o">=</span> <span class="n">nrc_mac_bss_info_changed</span><span class="p">,</span>
+    <span class="p">.</span><span class="n">sta_state</span>          <span class="o">=</span> <span class="n">nrc_mac_sta_state</span><span class="p">,</span>
+    <span class="p">.</span><span class="n">conf_tx</span>            <span class="o">=</span> <span class="n">nrc_mac_conf_tx</span><span class="p">,</span>
+    <span class="p">.</span><span class="n">set_key</span>            <span class="o">=</span> <span class="n">nrc_mac_set_key</span><span class="p">,</span>
+    <span class="c1">// ... additional operations</span>
+<span class="p">};</span>
+</code></pre></div></div>
+
+<p><strong>Key Functions:</strong></p>
+<ul>
+  <li>Interface management (STA, AP, Mesh, Monitor modes)</li>
+  <li>TX/RX packet handling integration</li>
+  <li>Configuration and state management</li>
+  <li>Security key management</li>
+</ul>
+
+<h3 id="2-wim-wireless-interface-module-protocol">2. WIM (Wireless Interface Module) Protocol</h3>
+
+<p><strong>Files</strong>: <code class="language-plaintext highlighter-rouge">wim.c/h</code>, <code class="language-plaintext highlighter-rouge">nrc-wim-types.h</code></p>
+
+<p>WIM provides the communication protocol between the driver and firmware:</p>
+
+<div class="language-c highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">struct</span> <span class="n">wim</span> <span class="p">{</span>
+    <span class="n">u8</span> <span class="n">cmd</span><span class="p">;</span>           <span class="c1">// Command type</span>
+    <span class="n">u8</span> <span class="n">seqno</span><span class="p">;</span>         <span class="c1">// Sequence number</span>
+    <span class="n">u16</span> <span class="n">tlv_len</span><span class="p">;</span>      <span class="c1">// TLV payload length</span>
+    <span class="n">u32</span> <span class="n">flags</span><span class="p">;</span>        <span class="c1">// Control flags</span>
+<span class="p">}</span> <span class="n">__packed</span><span class="p">;</span>
+</code></pre></div></div>
+
+<p><strong>WIM Command Categories:</strong></p>
+<ul>
+  <li><strong>Configuration</strong>: Channel, power, regulatory settings</li>
+  <li><strong>Station Management</strong>: Association, authentication, key exchange</li>
+  <li><strong>Data Control</strong>: TX/RX parameters, AMPDU settings</li>
+  <li><strong>Debug/Statistics</strong>: Performance monitoring, diagnostics</li>
+</ul>
+
+<h3 id="3-hardware-interface-hif-layer">3. Hardware Interface (HIF) Layer</h3>
+
+<p><strong>Files</strong>: <code class="language-plaintext highlighter-rouge">hif.c/h</code>, <code class="language-plaintext highlighter-rouge">nrc-hif-*.c</code></p>
+
+<p>The HIF layer abstracts hardware communication:</p>
+
+<div class="language-c highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">struct</span> <span class="n">hif</span> <span class="p">{</span>
+    <span class="n">u8</span> <span class="n">type</span><span class="p">;</span>        <span class="c1">// HIF_TYPE_FRAME, HIF_TYPE_WIM</span>
+    <span class="n">u8</span> <span class="n">subtype</span><span class="p">;</span>     <span class="c1">// Frame subtype</span>
+    <span class="n">u16</span> <span class="n">len</span><span class="p">;</span>        <span class="c1">// Payload length</span>
+    <span class="n">s8</span> <span class="n">vifindex</span><span class="p">;</span>    <span class="c1">// Virtual interface index</span>
+<span class="p">}</span> <span class="n">__packed</span><span class="p">;</span>
+</code></pre></div></div>
+
+<p><strong>Supported Interfaces:</strong></p>
+<ul>
+  <li><strong>CSPI (Custom SPI)</strong>: Primary interface for NRC7292</li>
+  <li><strong>UART</strong>: Alternative serial interface</li>
+  <li><strong>USB</strong>: Development and testing interface</li>
+</ul>
+
+<h3 id="4-txrx-processing-engine">4. TX/RX Processing Engine</h3>
+
+<p><strong>Files</strong>: <code class="language-plaintext highlighter-rouge">nrc-trx.c/h</code></p>
+
+<p>Handles packet transmission and reception with advanced features:</p>
+
+<h4 id="tx-path-features">TX Path Features:</h4>
+<ul>
+  <li><strong>Credit-based flow control</strong>: Hardware buffer management</li>
+  <li><strong>TX tasklet processing</strong>: Bottom-half sequential transmission</li>
+  <li><strong>AMPDU Block ACK</strong>: Automatic aggregation management</li>
+  <li><strong>Handler chain</strong>: Modular processing pipeline</li>
+</ul>
+
+<h4 id="rx-path-features">RX Path Features:</h4>
+<ul>
+  <li><strong>Multi-threaded processing</strong>: Workqueue-based RX handling</li>
+  <li><strong>Frame filtering</strong>: Protocol-specific filtering</li>
+  <li><strong>Statistics collection</strong>: Performance monitoring</li>
+</ul>
+
+<h3 id="5-power-management">5. Power Management</h3>
+
+<p><strong>Files</strong>: <code class="language-plaintext highlighter-rouge">nrc-pm.c/h</code></p>
+
+<p>Comprehensive power management for IoT applications:</p>
+
+<div class="language-c highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">enum</span> <span class="n">NRC_PS_MODE</span> <span class="p">{</span>
+    <span class="n">NRC_PS_NONE</span><span class="p">,</span>               <span class="c1">// No power save</span>
+    <span class="n">NRC_PS_MODEMSLEEP</span><span class="p">,</span>         <span class="c1">// Modem sleep mode</span>
+    <span class="n">NRC_PS_DEEPSLEEP_TIM</span><span class="p">,</span>      <span class="c1">// Deep sleep with TIM</span>
+    <span class="n">NRC_PS_DEEPSLEEP_NONTIM</span>    <span class="c1">// Deep sleep without TIM</span>
+<span class="p">};</span>
+</code></pre></div></div>
+
+<p><strong>Power Save Features:</strong></p>
+<ul>
+  <li><strong>Dynamic power scaling</strong>: Adaptive power based on traffic</li>
+  <li><strong>BSS max idle</strong>: Keep-alive mechanism for AP mode</li>
+  <li><strong>Target wake time</strong>: Scheduled wake-up coordination</li>
+  <li><strong>Listen interval</strong>: STA sleep scheduling</li>
+</ul>
+
+<h2 id="data-flow-architecture">Data Flow Architecture</h2>
+
+<h3 id="tx-data-flow">TX Data Flow</h3>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>mac80211 → nrc_mac_tx() → TX handlers → Credit check → 
+WIM encapsulation → HIF framing → CSPI transmission → Firmware
+</code></pre></div></div>
+
+<h3 id="rx-data-flow">RX Data Flow</h3>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>Firmware → CSPI reception → HIF parsing → WIM processing → 
+RX handlers → Frame validation → mac80211 indication
+</code></pre></div></div>
+
+<h2 id="memory-management">Memory Management</h2>
+
+<h3 id="skb-socket-buffer-processing">SKB (Socket Buffer) Processing</h3>
+
+<p>The driver uses Linux SKB structures for efficient packet handling:</p>
+
+<div class="language-c highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c1">// TX: Add headers using headroom</span>
+<span class="n">hif</span> <span class="o">=</span> <span class="p">(</span><span class="kt">void</span> <span class="o">*</span><span class="p">)</span><span class="n">skb_push</span><span class="p">(</span><span class="n">skb</span><span class="p">,</span> <span class="k">sizeof</span><span class="p">(</span><span class="k">struct</span> <span class="n">hif</span><span class="p">));</span>
+<span class="n">wim</span> <span class="o">=</span> <span class="p">(</span><span class="kt">void</span> <span class="o">*</span><span class="p">)</span><span class="n">skb_push</span><span class="p">(</span><span class="n">skb</span><span class="p">,</span> <span class="k">sizeof</span><span class="p">(</span><span class="k">struct</span> <span class="n">wim</span><span class="p">));</span>
+
+<span class="c1">// RX: Remove headers</span>
+<span class="n">skb_pull</span><span class="p">(</span><span class="n">skb</span><span class="p">,</span> <span class="k">sizeof</span><span class="p">(</span><span class="k">struct</span> <span class="n">hif</span><span class="p">));</span>
+<span class="n">skb_pull</span><span class="p">(</span><span class="n">skb</span><span class="p">,</span> <span class="k">sizeof</span><span class="p">(</span><span class="k">struct</span> <span class="n">wim</span><span class="p">));</span>
+</code></pre></div></div>
+
+<h3 id="driver-private-structures">Driver Private Structures</h3>
+
+<p>Each mac80211 structure has associated driver-private data:</p>
+
+<div class="language-c highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="cp">#define to_i_vif(v)  ((struct nrc_vif *) (v)-&gt;drv_priv)
+#define to_i_sta(s)  ((struct nrc_sta *) (s)-&gt;drv_priv)
+</span></code></pre></div></div>
+
+<h2 id="hardware-abstraction">Hardware Abstraction</h2>
+
+<h3 id="cspi-custom-spi-protocol">CSPI (Custom SPI) Protocol</h3>
+
+<div class="language-c highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="cm">/*
+ * CSPI Command Format:
+ * [31:24]: Start byte (0x50)
+ * [23:23]: Burst mode
+ * [22:22]: Direction (read/write)
+ * [21:21]: Address mode (fixed/incremental)
+ * [20:13]: Register address
+ * [12:0]:  Transfer length
+ */</span>
+<span class="cp">#define C_SPI_WRITE     0x50400000
+#define C_SPI_READ      0x50000000
+#define C_SPI_BURST     0x00800000
+</span></code></pre></div></div>
+
+<h3 id="interrupt-handling">Interrupt Handling</h3>
+
+<div class="language-c highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c1">// GPIO-based interrupt for CSPI</span>
+<span class="k">static</span> <span class="n">irqreturn_t</span> <span class="nf">nrc_hif_isr</span><span class="p">(</span><span class="kt">int</span> <span class="n">irq</span><span class="p">,</span> <span class="kt">void</span> <span class="o">*</span><span class="n">dev_id</span><span class="p">)</span>
+<span class="p">{</span>
+    <span class="k">struct</span> <span class="n">nrc_hif_device</span> <span class="o">*</span><span class="n">hdev</span> <span class="o">=</span> <span class="n">dev_id</span><span class="p">;</span>
+    
+    <span class="c1">// Disable interrupt</span>
+    <span class="n">disable_irq_nosync</span><span class="p">(</span><span class="n">hdev</span><span class="o">-&gt;</span><span class="n">irq</span><span class="p">);</span>
+    
+    <span class="c1">// Schedule bottom-half processing</span>
+    <span class="n">schedule_work</span><span class="p">(</span><span class="o">&amp;</span><span class="n">hdev</span><span class="o">-&gt;</span><span class="n">work</span><span class="p">);</span>
+    
+    <span class="k">return</span> <span class="n">IRQ_HANDLED</span><span class="p">;</span>
+<span class="p">}</span>
+</code></pre></div></div>
+
+<h2 id="supported-network-modes">Supported Network Modes</h2>
+
+<h3 id="1-station-sta-mode">1. Station (STA) Mode</h3>
+<ul>
+  <li><strong>Infrastructure connectivity</strong>: Connect to existing APs</li>
+  <li><strong>Power management</strong>: Advanced sleep scheduling</li>
+  <li><strong>Roaming support</strong>: Seamless AP transitions</li>
+</ul>
+
+<h3 id="2-access-point-ap-mode">2. Access Point (AP) Mode</h3>
+<ul>
+  <li><strong>Client support</strong>: Up to 8192 associated clients</li>
+  <li><strong>Security</strong>: WPA2/WPA3 with hardware acceleration</li>
+  <li><strong>QoS management</strong>: 4-AC traffic prioritization</li>
+</ul>
+
+<h3 id="3-mesh-networking">3. Mesh Networking</h3>
+<ul>
+  <li><strong>IEEE 802.11s compliance</strong>: Standard mesh protocols</li>
+  <li><strong>HWMP routing</strong>: Hybrid wireless mesh protocol</li>
+  <li><strong>Self-healing</strong>: Automatic path recovery</li>
+</ul>
+
+<h3 id="4-monitor-mode">4. Monitor Mode</h3>
+<ul>
+  <li><strong>Packet capture</strong>: All frame types</li>
+  <li><strong>Radiotap headers</strong>: Detailed RF information</li>
+  <li><strong>Real-time analysis</strong>: Low-latency monitoring</li>
+</ul>
+
+<h2 id="ieee-80211ah-specific-features">IEEE 802.11ah Specific Features</h2>
+
+<h3 id="s1g-sub-1ghz-support">S1G (Sub-1GHz) Support</h3>
+
+<div class="language-c highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c1">// S1G channel configuration</span>
+<span class="k">struct</span> <span class="n">s1g_channel_info</span> <span class="p">{</span>
+    <span class="n">u16</span> <span class="n">center_freq</span><span class="p">;</span>     <span class="c1">// Center frequency in MHz</span>
+    <span class="n">u8</span> <span class="n">bandwidth</span><span class="p">;</span>        <span class="c1">// 1, 2, 4, 8, 16 MHz</span>
+    <span class="n">u8</span> <span class="n">primary_channel</span><span class="p">;</span>  <span class="c1">// Primary channel number</span>
+    <span class="n">u8</span> <span class="n">channel_width</span><span class="p">;</span>    <span class="c1">// Channel width index</span>
+<span class="p">};</span>
+</code></pre></div></div>
+
+<h3 id="extended-range-features">Extended Range Features</h3>
+<ul>
+  <li><strong>1km+ communication range</strong>: 10x improvement over 2.4GHz</li>
+  <li><strong>Building penetration</strong>: Enhanced signal propagation</li>
+  <li><strong>Interference resistance</strong>: Sub-1GHz band advantages</li>
+</ul>
+
+<h3 id="iot-optimizations">IoT Optimizations</h3>
+<ul>
+  <li><strong>Massive device support</strong>: 8192 devices per AP</li>
+  <li><strong>Ultra-low power</strong>: Years of battery operation</li>
+  <li><strong>Small data efficiency</strong>: Optimized for sensor data</li>
+</ul>
+
+<h2 id="configuration-and-management">Configuration and Management</h2>
+
+<h3 id="module-parameters">Module Parameters</h3>
+
+<div class="language-c highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c1">// Key module parameters</span>
+<span class="n">module_param</span><span class="p">(</span><span class="n">fw_name</span><span class="p">,</span> <span class="n">charp</span><span class="p">,</span> <span class="mo">0444</span><span class="p">);</span>           <span class="c1">// Firmware file</span>
+<span class="n">module_param</span><span class="p">(</span><span class="n">bd_name</span><span class="p">,</span> <span class="n">charp</span><span class="p">,</span> <span class="mo">0600</span><span class="p">);</span>           <span class="c1">// Board data file  </span>
+<span class="n">module_param</span><span class="p">(</span><span class="n">hifspeed</span><span class="p">,</span> <span class="kt">int</span><span class="p">,</span> <span class="mo">0600</span><span class="p">);</span>            <span class="c1">// Interface speed</span>
+<span class="n">module_param</span><span class="p">(</span><span class="n">spi_gpio_irq</span><span class="p">,</span> <span class="kt">int</span><span class="p">,</span> <span class="mo">0600</span><span class="p">);</span>        <span class="c1">// GPIO interrupt pin</span>
+<span class="n">module_param</span><span class="p">(</span><span class="n">power_save</span><span class="p">,</span> <span class="kt">int</span><span class="p">,</span> <span class="mo">0600</span><span class="p">);</span>          <span class="c1">// Power save mode</span>
+</code></pre></div></div>
+
+<h3 id="netlink-interface">Netlink Interface</h3>
+
+<p><strong>File</strong>: <code class="language-plaintext highlighter-rouge">nrc-netlink.c/h</code></p>
+
+<p>Provides userspace control interface:</p>
+
+<div class="language-c highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c1">// Netlink command types</span>
+<span class="k">enum</span> <span class="n">NRC_NL_COMMANDS</span> <span class="p">{</span>
+    <span class="n">NRC_NL_CMD_SET_CONFIG</span><span class="p">,</span>
+    <span class="n">NRC_NL_CMD_GET_STATUS</span><span class="p">,</span>
+    <span class="n">NRC_NL_CMD_TRIGGER_SCAN</span><span class="p">,</span>
+    <span class="n">NRC_NL_CMD_SET_AMPDU</span><span class="p">,</span>
+    <span class="c1">// ... additional commands</span>
+<span class="p">};</span>
+</code></pre></div></div>
+
+<h2 id="testing-and-validation">Testing and Validation</h2>
+
+<h3 id="test-framework-structure">Test Framework Structure</h3>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>test/
+├── block_ack/          # AMPDU and BA testing
+├── netlink/            # Netlink interface tests  
+├── vendor/             # Vendor-specific tests
+├── insmod_rmmod_test.py    # Module lifecycle testing
+└── channel_sweep_test.py   # Channel performance testing
+</code></pre></div></div>
+
+<h3 id="comprehensive-testing-coverage">Comprehensive Testing Coverage</h3>
+<ul>
+  <li><strong>Protocol compliance</strong>: IEEE 802.11ah standard verification</li>
+  <li><strong>Performance testing</strong>: Throughput, latency, range testing</li>
+  <li><strong>Stress testing</strong>: Long-duration stability validation</li>
+  <li><strong>Interoperability</strong>: Multi-vendor device testing</li>
+</ul>
+
+<h2 id="conclusion">Conclusion</h2>
+
+<p>The NRC7292 driver architecture demonstrates a well-designed, layered approach optimized for IEEE 802.11ah HaLow applications. Key architectural strengths include:</p>
+
+<ol>
+  <li><strong>Clean Layer Separation</strong>: Clear interfaces between components</li>
+  <li><strong>mac80211 Integration</strong>: Full compliance with Linux wireless framework</li>
+  <li><strong>Efficient Data Flow</strong>: Zero-copy optimization and hardware acceleration</li>
+  <li><strong>Comprehensive Power Management</strong>: IoT-focused energy efficiency</li>
+  <li><strong>Extensive Testing</strong>: Production-quality validation framework</li>
+</ol>
+
+<p>This architecture effectively bridges the gap between Linux networking stack and specialized HaLow hardware, providing a robust foundation for IoT deployment scenarios requiring long-range, low-power wireless connectivity.</p>
+
+<hr />
+
+<p><em>For detailed component analysis and source code insights, explore the complete <a href="https://github.com/oyongjoo/nrc7292-analysis">NRC7292 analysis documentation</a>.</em></p>]]></content><author><name>Liam Lee</name></author><category term="Architecture" /><category term="architecture" /><category term="halow" /><category term="802.11ah" /><category term="kernel-driver" /><category term="overview" /><summary type="html"><![CDATA[Comprehensive overview of the NRC7292 HaLow driver architecture, including layer structure, component interactions, and IEEE 802.11ah implementation details.]]></summary></entry><entry><title type="html">NRC7292 HaLow Mesh Networking Implementation</title><link href="http://0.0.0.0:4000/2025/06/17/nrc7292-mesh-networking/" rel="alternate" type="text/html" title="NRC7292 HaLow Mesh Networking Implementation" /><published>2025-06-17T00:00:00+09:00</published><updated>2025-06-17T00:00:00+09:00</updated><id>http://0.0.0.0:4000/2025/06/17/nrc7292-mesh-networking</id><content type="html" xml:base="http://0.0.0.0:4000/2025/06/17/nrc7292-mesh-networking/"><![CDATA[<h1 id="nrc7292-halow-mesh-networking-implementation">NRC7292 HaLow Mesh Networking Implementation</h1>
+
+<p>The NRC7292 HaLow driver provides comprehensive IEEE 802.11s mesh networking support, optimized for IoT applications requiring long-range, low-power wireless connectivity with self-healing network capabilities.</p>
+
+<h2 id="mesh-interface-support">Mesh Interface Support</h2>
+
+<h3 id="mac80211-integration">mac80211 Integration</h3>
+
+<p>The driver supports mesh point interfaces through standard mac80211 framework:</p>
+
+<div class="language-c highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c1">// Mesh interface support in nrc-mac80211.c</span>
+<span class="k">static</span> <span class="k">const</span> <span class="k">struct</span> <span class="n">ieee80211_iface_limit</span> <span class="n">if_limits_multi</span><span class="p">[]</span> <span class="o">=</span> <span class="p">{</span>
+    <span class="p">{</span>
+        <span class="p">.</span><span class="n">max</span> <span class="o">=</span> <span class="mi">1</span><span class="p">,</span>
+        <span class="p">.</span><span class="n">types</span> <span class="o">=</span> <span class="n">BIT</span><span class="p">(</span><span class="n">NL80211_IFTYPE_STATION</span><span class="p">)</span> <span class="o">|</span>
+                 <span class="n">BIT</span><span class="p">(</span><span class="n">NL80211_IFTYPE_AP</span><span class="p">)</span> <span class="o">|</span>
+                 <span class="n">BIT</span><span class="p">(</span><span class="n">NL80211_IFTYPE_MESH_POINT</span><span class="p">),</span>  <span class="c1">// Mesh support</span>
+    <span class="p">},</span>
+<span class="p">};</span>
+
+<span class="c1">// Supported interface modes</span>
+<span class="n">hw</span><span class="o">-&gt;</span><span class="n">wiphy</span><span class="o">-&gt;</span><span class="n">interface_modes</span> <span class="o">=</span> 
+    <span class="n">BIT</span><span class="p">(</span><span class="n">NL80211_IFTYPE_STATION</span><span class="p">)</span> <span class="o">|</span>
+    <span class="n">BIT</span><span class="p">(</span><span class="n">NL80211_IFTYPE_AP</span><span class="p">)</span> <span class="o">|</span>
+    <span class="n">BIT</span><span class="p">(</span><span class="n">NL80211_IFTYPE_MESH_POINT</span><span class="p">)</span> <span class="o">|</span>    <span class="c1">// Full mesh support</span>
+    <span class="n">BIT</span><span class="p">(</span><span class="n">NL80211_IFTYPE_MONITOR</span><span class="p">);</span>
+</code></pre></div></div>
+
+<h3 id="wim-protocol-mesh-support">WIM Protocol Mesh Support</h3>
+
+<div class="language-c highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c1">// Mesh station type in WIM protocol</span>
+<span class="k">enum</span> <span class="n">WIM_STA_TYPE</span> <span class="p">{</span>
+    <span class="n">WIM_STA_TYPE_STA</span> <span class="o">=</span> <span class="mi">0</span><span class="p">,</span>
+    <span class="n">WIM_STA_TYPE_AP</span><span class="p">,</span>
+    <span class="n">WIM_STA_TYPE_MONITOR</span><span class="p">,</span>
+    <span class="n">WIM_STA_TYPE_MESH_POINT</span><span class="p">,</span>     <span class="c1">// Dedicated mesh type</span>
+    <span class="n">WIM_STA_TYPE_MAX</span>
+<span class="p">};</span>
+</code></pre></div></div>
+
+<h3 id="automatic-signal-monitoring">Automatic Signal Monitoring</h3>
+
+<div class="language-c highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c1">// Enhanced monitoring for mesh networks</span>
+<span class="k">static</span> <span class="kt">int</span> <span class="nf">nrc_mac_add_interface</span><span class="p">(</span><span class="k">struct</span> <span class="n">ieee80211_hw</span> <span class="o">*</span><span class="n">hw</span><span class="p">,</span>
+                                <span class="k">struct</span> <span class="n">ieee80211_vif</span> <span class="o">*</span><span class="n">vif</span><span class="p">)</span>
+<span class="p">{</span>
+    <span class="k">if</span> <span class="p">(</span><span class="n">vif</span><span class="o">-&gt;</span><span class="n">type</span> <span class="o">==</span> <span class="n">NL80211_IFTYPE_MESH_POINT</span><span class="p">)</span> <span class="p">{</span>
+        <span class="c1">// Activate signal strength monitoring for mesh</span>
+        <span class="n">set_bit</span><span class="p">(</span><span class="n">NRC_VIF_SIGNAL_MONITOR</span><span class="p">,</span> <span class="o">&amp;</span><span class="n">i_vif</span><span class="o">-&gt;</span><span class="n">flags</span><span class="p">);</span>
+    <span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div></div>
+
+<h2 id="ieee-80211s-standard-implementation">IEEE 802.11s Standard Implementation</h2>
+
+<h3 id="mesh-node-types">Mesh Node Types</h3>
+
+<p>The NRC7292 supports all standard mesh node configurations:</p>
+
+<ol>
+  <li><strong>MP (Mesh Point)</strong>: Basic mesh node with routing capability</li>
+  <li><strong>MPP (Mesh Portal Point)</strong>: Internet gateway providing external connectivity</li>
+  <li><strong>MAP (Mesh Access Point)</strong>: Hybrid node serving both mesh and infrastructure clients</li>
+</ol>
+
+<h3 id="mesh-security">Mesh Security</h3>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c"># Open mesh (no security)</span>
+<span class="nv">mode</span><span class="o">=</span>5
+<span class="nv">mesh_fwding</span><span class="o">=</span>1
+
+<span class="c"># WPA3-SAE secure mesh</span>
+<span class="nv">mode</span><span class="o">=</span>5
+<span class="nv">sae</span><span class="o">=</span>1
+<span class="nv">mesh_fwding</span><span class="o">=</span>1
+<span class="nv">ieee80211w</span><span class="o">=</span>2                <span class="c"># Management frame protection (required)</span>
+</code></pre></div></div>
+
+<h3 id="configuration-parameters">Configuration Parameters</h3>
+
+<div class="language-conf highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c"># Core mesh configuration (mp_halow_*.conf)
+</span><span class="n">mode</span>=<span class="m">5</span>                           <span class="c"># Mesh mode
+</span><span class="n">beacon_int</span>=<span class="m">100</span>                   <span class="c"># 100ms beacon interval
+</span><span class="n">dot11MeshRetryTimeout</span>=<span class="m">1000</span>       <span class="c"># Mesh retry timeout
+</span><span class="n">dot11MeshHoldingTimeout</span>=<span class="m">400</span>      <span class="c"># Mesh holding timeout  
+</span><span class="n">dot11MeshMaxRetries</span>=<span class="m">4</span>            <span class="c"># Maximum retry count
+</span><span class="n">mesh_rssi_threshold</span>=-<span class="m">90</span>          <span class="c"># Peering RSSI threshold
+</span><span class="n">mesh_basic_rates</span>=<span class="m">60</span> <span class="m">120</span> <span class="m">240</span>      <span class="c"># Basic rates (6, 12, 24 Mbps)
+</span><span class="n">mesh_max_inactivity</span>=-<span class="m">1</span>           <span class="c"># Disable inactivity timeout
+</span></code></pre></div></div>
+
+<h2 id="path-selection-and-routing">Path Selection and Routing</h2>
+
+<h3 id="hwmp-hybrid-wireless-mesh-protocol">HWMP (Hybrid Wireless Mesh Protocol)</h3>
+
+<p>The driver implements IEEE 802.11s HWMP for intelligent path selection:</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c"># Root mode configuration (for gateway nodes)</span>
+iw dev wlan0 <span class="nb">set </span>mesh_param mesh_hwmp_rootmode 2
+iw dev wlan0 <span class="nb">set </span>mesh_param mesh_hwmp_root_interval 1000
+
+<span class="c"># Gateway announcement for MPP nodes</span>
+iw dev wlan0 <span class="nb">set </span>mesh_param mesh_gate_announcements 1
+
+<span class="c"># Peer link management</span>
+iw dev wlan0 <span class="nb">set </span>mesh_param mesh_plink_timeout 0
+
+<span class="c"># Path refresh and maintenance</span>
+iw dev wlan0 <span class="nb">set </span>mesh_param mesh_hwmp_path_refresh_time 1000
+</code></pre></div></div>
+
+<h3 id="hwmp-protocol-messages">HWMP Protocol Messages</h3>
+
+<div class="language-c highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c1">// Standard HWMP message types</span>
+<span class="k">enum</span> <span class="n">hwmp_message_types</span> <span class="p">{</span>
+    <span class="n">PREQ</span> <span class="o">=</span> <span class="mi">0</span><span class="p">,</span>    <span class="c1">// Path Request</span>
+    <span class="n">PREP</span> <span class="o">=</span> <span class="mi">1</span><span class="p">,</span>    <span class="c1">// Path Reply  </span>
+    <span class="n">PERR</span> <span class="o">=</span> <span class="mi">2</span><span class="p">,</span>    <span class="c1">// Path Error</span>
+    <span class="n">RANN</span> <span class="o">=</span> <span class="mi">3</span>     <span class="c1">// Root Announcement</span>
+<span class="p">};</span>
+</code></pre></div></div>
+
+<h3 id="manual-peer-management">Manual Peer Management</h3>
+
+<div class="language-python highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c1"># Advanced peer management through mesh_add_peer.py
+</span><span class="k">def</span> <span class="nf">add_mesh_peer</span><span class="p">(</span><span class="n">interface</span><span class="p">,</span> <span class="n">peer_mac</span><span class="p">):</span>
+    <span class="sh">"""</span><span class="s">Manual peer addition when auto-peering disabled</span><span class="sh">"""</span>
+    <span class="n">cmd</span> <span class="o">=</span> <span class="sa">f</span><span class="sh">"</span><span class="s">wpa_cli -i </span><span class="si">{</span><span class="n">interface</span><span class="si">}</span><span class="s"> mesh_peer_add </span><span class="si">{</span><span class="n">peer_mac</span><span class="si">}</span><span class="sh">"</span>
+    <span class="n">subprocess</span><span class="p">.</span><span class="nf">run</span><span class="p">(</span><span class="n">cmd</span><span class="p">,</span> <span class="n">shell</span><span class="o">=</span><span class="bp">True</span><span class="p">)</span>
+
+<span class="k">def</span> <span class="nf">monitor_mesh_peers</span><span class="p">(</span><span class="n">interface</span><span class="p">):</span>
+    <span class="sh">"""</span><span class="s">Continuous peer connectivity monitoring</span><span class="sh">"""</span>
+    <span class="k">while</span> <span class="bp">True</span><span class="p">:</span>
+        <span class="nf">check_peer_connectivity</span><span class="p">()</span>
+        <span class="nf">auto_reconnect_failed_peers</span><span class="p">()</span>
+        <span class="n">time</span><span class="p">.</span><span class="nf">sleep</span><span class="p">(</span><span class="mi">10</span><span class="p">)</span>
+</code></pre></div></div>
+
+<h3 id="batman-adv-integration">Batman-adv Integration</h3>
+
+<p>For advanced mesh routing scenarios:</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c"># Load batman-adv kernel module</span>
+<span class="nb">echo</span> <span class="s1">'batman-adv'</span> <span class="o">&gt;&gt;</span> /etc/modules
+modprobe batman-adv
+
+<span class="c"># Disable kernel mesh forwarding</span>
+iw dev wlan0 <span class="nb">set </span>mesh_param mesh_fwding 0
+
+<span class="c"># Add interface to batman-adv</span>
+batctl <span class="k">if </span>add wlan0
+ifconfig bat0 up
+
+<span class="c"># Configure batman-adv parameters</span>
+batctl gw_mode server
+batctl it 1000        <span class="c"># Originator interval</span>
+batctl vis_mode server
+</code></pre></div></div>
+
+<h2 id="sub-1ghz-mesh-optimizations">Sub-1GHz Mesh Optimizations</h2>
+
+<h3 id="extended-communication-range">Extended Communication Range</h3>
+
+<p>The HaLow band provides significant advantages for mesh networking:</p>
+
+<div class="language-c highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c1">// Range comparison</span>
+<span class="n">Conventional</span> <span class="n">WiFi</span> <span class="n">mesh</span><span class="o">:</span>  <span class="o">~</span><span class="mi">100</span><span class="n">m</span> <span class="n">inter</span><span class="o">-</span><span class="n">node</span> <span class="n">distance</span>
+<span class="n">HaLow</span> <span class="n">mesh</span><span class="o">:</span>             <span class="o">~</span><span class="mi">1</span><span class="n">km</span> <span class="n">inter</span><span class="o">-</span><span class="n">node</span> <span class="n">distance</span> <span class="p">(</span><span class="mi">10</span><span class="n">x</span> <span class="n">improvement</span><span class="p">)</span>
+
+<span class="n">Benefits</span><span class="o">:</span>
+<span class="o">-</span> <span class="n">Dramatically</span> <span class="n">reduced</span> <span class="n">infrastructure</span> <span class="n">requirements</span>
+<span class="o">-</span> <span class="n">Improved</span> <span class="n">outdoor</span> <span class="n">and</span> <span class="n">rural</span> <span class="n">area</span> <span class="n">deployment</span>  
+<span class="o">-</span> <span class="n">Reduced</span> <span class="n">dead</span> <span class="n">zone</span> <span class="n">phenomena</span>
+<span class="o">-</span> <span class="n">Better</span> <span class="n">obstacle</span> <span class="n">penetration</span>
+</code></pre></div></div>
+
+<h3 id="low-power-mesh-operation">Low-Power Mesh Operation</h3>
+
+<div class="language-conf highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c"># Power optimization for battery-powered mesh nodes
+</span><span class="n">power_save</span>=<span class="m">2</span>                     <span class="c"># Enable power save mode
+</span><span class="n">beacon_int</span>=<span class="m">200</span>                   <span class="c"># Extended beacon interval (200ms)
+</span><span class="n">dtim_period</span>=<span class="m">3</span>                    <span class="c"># Extended DTIM period
+</span><span class="n">mesh_max_inactivity</span>=<span class="m">300000</span>       <span class="c"># 5-minute inactivity timeout
+</span></code></pre></div></div>
+
+<h3 id="s1g-channel-configuration">S1G Channel Configuration</h3>
+
+<div class="language-python highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c1"># Optimal channel configuration for mesh networks
+</span><span class="k">def</span> <span class="nf">setup_mesh_channel</span><span class="p">():</span>
+    <span class="sh">"""</span><span class="s">
+    Channel selection strategy for mesh deployment
+    </span><span class="sh">"""</span>
+    <span class="n">channels</span> <span class="o">=</span> <span class="p">{</span>
+        <span class="sh">'</span><span class="s">max_range</span><span class="sh">'</span><span class="p">:</span> <span class="p">{</span>
+            <span class="sh">'</span><span class="s">freq</span><span class="sh">'</span><span class="p">:</span> <span class="mi">9025</span><span class="p">,</span> 
+            <span class="sh">'</span><span class="s">bw</span><span class="sh">'</span><span class="p">:</span> <span class="mi">1</span><span class="p">,</span>           <span class="c1"># 1MHz for maximum range
+</span>            <span class="sh">'</span><span class="s">power</span><span class="sh">'</span><span class="p">:</span> <span class="mi">20</span>        <span class="c1"># Maximum allowed power
+</span>        <span class="p">},</span>
+        <span class="sh">'</span><span class="s">balanced</span><span class="sh">'</span><span class="p">:</span> <span class="p">{</span>
+            <span class="sh">'</span><span class="s">freq</span><span class="sh">'</span><span class="p">:</span> <span class="mi">9035</span><span class="p">,</span> 
+            <span class="sh">'</span><span class="s">bw</span><span class="sh">'</span><span class="p">:</span> <span class="mi">2</span><span class="p">,</span>           <span class="c1"># 2MHz balance range/throughput
+</span>            <span class="sh">'</span><span class="s">power</span><span class="sh">'</span><span class="p">:</span> <span class="mi">15</span>        <span class="c1"># Moderate power consumption
+</span>        <span class="p">},</span>
+        <span class="sh">'</span><span class="s">high_throughput</span><span class="sh">'</span><span class="p">:</span> <span class="p">{</span>
+            <span class="sh">'</span><span class="s">freq</span><span class="sh">'</span><span class="p">:</span> <span class="mi">9215</span><span class="p">,</span> 
+            <span class="sh">'</span><span class="s">bw</span><span class="sh">'</span><span class="p">:</span> <span class="mi">4</span><span class="p">,</span>           <span class="c1"># 4MHz for high data rate
+</span>            <span class="sh">'</span><span class="s">power</span><span class="sh">'</span><span class="p">:</span> <span class="mi">10</span>        <span class="c1"># Lower power for dense deployment
+</span>        <span class="p">}</span>
+    <span class="p">}</span>
+</code></pre></div></div>
+
+<h2 id="mesh-frame-processing">Mesh Frame Processing</h2>
+
+<h3 id="ieee-80211s-mesh-header">IEEE 802.11s Mesh Header</h3>
+
+<div class="language-c highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c1">// Standard mesh header structure</span>
+<span class="k">struct</span> <span class="n">ieee80211s_hdr</span> <span class="p">{</span>
+    <span class="n">u8</span> <span class="n">flags</span><span class="p">;</span>                    <span class="c1">// Mesh flags (Address Extension)</span>
+    <span class="n">u8</span> <span class="n">ttl</span><span class="p">;</span>                      <span class="c1">// Time To Live</span>
+    <span class="n">__le32</span> <span class="n">seqnum</span><span class="p">;</span>               <span class="c1">// Sequence number for loop prevention</span>
+    <span class="n">u8</span> <span class="n">eaddr1</span><span class="p">[</span><span class="n">ETH_ALEN</span><span class="p">];</span>         <span class="c1">// Extended address 1</span>
+    <span class="n">u8</span> <span class="n">eaddr2</span><span class="p">[</span><span class="n">ETH_ALEN</span><span class="p">];</span>         <span class="c1">// Extended address 2 (optional)</span>
+    <span class="n">u8</span> <span class="n">eaddr3</span><span class="p">[</span><span class="n">ETH_ALEN</span><span class="p">];</span>         <span class="c1">// Extended address 3 (optional)</span>
+<span class="p">}</span> <span class="n">__packed</span><span class="p">;</span>
+</code></pre></div></div>
+
+<h3 id="mesh-data-forwarding">Mesh Data Forwarding</h3>
+
+<p>The firmware handles mesh frame forwarding at hardware level:</p>
+
+<div class="language-c highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c1">// Firmware-level mesh processing</span>
+<span class="n">Features</span><span class="o">:</span>
+<span class="o">-</span> <span class="n">Hardware</span><span class="o">-</span><span class="n">accelerated</span> <span class="n">path</span> <span class="n">lookup</span>
+<span class="o">-</span> <span class="n">Efficient</span> <span class="n">frame</span> <span class="n">deduplication</span>
+<span class="o">-</span> <span class="n">Broadcast</span><span class="o">/</span><span class="n">multicast</span> <span class="n">flooding</span> <span class="n">control</span>
+<span class="o">-</span> <span class="n">Automatic</span> <span class="n">loop</span> <span class="n">prevention</span>
+<span class="o">-</span> <span class="n">QoS</span><span class="o">-</span><span class="n">aware</span> <span class="n">forwarding</span>
+</code></pre></div></div>
+
+<h2 id="network-topology-configurations">Network Topology Configurations</h2>
+
+<h3 id="tree-based-mesh-root-mode">Tree-Based Mesh (Root Mode)</h3>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c"># Root node configuration (internet gateway)</span>
+<span class="nv">mesh_hwmp_rootmode</span><span class="o">=</span>2             <span class="c"># Root mode with path selection</span>
+<span class="nv">mesh_gate_announcements</span><span class="o">=</span>1        <span class="c"># Announce gateway capability</span>
+<span class="nv">mesh_hwmp_root_interval</span><span class="o">=</span>1000     <span class="c"># Root announcement interval</span>
+
+<span class="c"># Leaf node configuration  </span>
+<span class="nv">mesh_hwmp_rootmode</span><span class="o">=</span>0             <span class="c"># Non-root mode</span>
+<span class="nv">mesh_gate_announcements</span><span class="o">=</span>0        <span class="c"># No gateway announcements</span>
+</code></pre></div></div>
+
+<h3 id="full-mesh-connectivity">Full Mesh Connectivity</h3>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c"># Distributed mesh without central coordination</span>
+<span class="nv">mesh_hwmp_rootmode</span><span class="o">=</span>0             <span class="c"># No dedicated root</span>
+<span class="nv">mesh_fwding</span><span class="o">=</span>1                    <span class="c"># Enable mesh forwarding</span>
+<span class="nv">no_auto_peer</span><span class="o">=</span>0                   <span class="c"># Enable automatic peering</span>
+</code></pre></div></div>
+
+<h3 id="hybrid-network-architecture">Hybrid Network Architecture</h3>
+
+<div class="language-python highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c1"># Mesh backbone + AP access points
+</span><span class="k">def</span> <span class="nf">setup_hybrid_network</span><span class="p">():</span>
+    <span class="sh">"""</span><span class="s">
+    Deploy hybrid mesh/infrastructure network
+    - Mesh backbone for node-to-node communication
+    - AP interfaces for client device access
+    - Bridge configuration for unified network
+    </span><span class="sh">"""</span>
+    <span class="c1"># Mesh interface configuration
+</span>    <span class="nf">setup_mesh_interface</span><span class="p">(</span><span class="sh">'</span><span class="s">wlan0</span><span class="sh">'</span><span class="p">,</span> <span class="n">mesh_id</span><span class="o">=</span><span class="sh">'</span><span class="s">IoT_Backbone</span><span class="sh">'</span><span class="p">)</span>
+    
+    <span class="c1"># AP interface for client access
+</span>    <span class="nf">setup_ap_interface</span><span class="p">(</span><span class="sh">'</span><span class="s">wlan1</span><span class="sh">'</span><span class="p">,</span> <span class="n">ssid</span><span class="o">=</span><span class="sh">'</span><span class="s">IoT_Access</span><span class="sh">'</span><span class="p">)</span>
+    
+    <span class="c1"># Bridge both interfaces
+</span>    <span class="nf">setup_bridge</span><span class="p">([</span><span class="sh">'</span><span class="s">wlan0</span><span class="sh">'</span><span class="p">,</span> <span class="sh">'</span><span class="s">wlan1</span><span class="sh">'</span><span class="p">,</span> <span class="sh">'</span><span class="s">eth0</span><span class="sh">'</span><span class="p">])</span>
+</code></pre></div></div>
+
+<h2 id="internet-connectivity">Internet Connectivity</h2>
+
+<h3 id="bridge-mode-configuration">Bridge Mode Configuration</h3>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c"># Internet gateway configuration (MPP node)</span>
+<span class="c"># Bridge mesh and ethernet interfaces</span>
+brctl addbr br0
+brctl addif br0 wlan0    <span class="c"># Add mesh interface</span>
+brctl addif br0 eth0     <span class="c"># Add ethernet interface</span>
+ifconfig br0 192.168.100.1 netmask 255.255.255.0
+ifconfig br0 up
+</code></pre></div></div>
+
+<h3 id="nat-mode-configuration">NAT Mode Configuration</h3>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c"># NAT-based internet sharing</span>
+iptables <span class="nt">-t</span> nat <span class="nt">-A</span> POSTROUTING <span class="nt">-o</span> eth0 <span class="nt">-j</span> MASQUERADE
+iptables <span class="nt">-A</span> FORWARD <span class="nt">-i</span> wlan0 <span class="nt">-o</span> eth0 <span class="nt">-j</span> ACCEPT
+iptables <span class="nt">-A</span> FORWARD <span class="nt">-i</span> eth0 <span class="nt">-o</span> wlan0 <span class="nt">-j</span> ACCEPT
+<span class="nb">echo </span>1 <span class="o">&gt;</span> /proc/sys/net/ipv4/ip_forward
+</code></pre></div></div>
+
+<h3 id="dhcp-integration">DHCP Integration</h3>
+
+<div class="language-conf highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c"># DHCP server for mesh network
+</span><span class="n">interface</span>=<span class="n">br0</span>
+<span class="n">dhcp</span>-<span class="n">range</span>=<span class="m">192</span>.<span class="m">168</span>.<span class="m">100</span>.<span class="m">10</span>,<span class="m">192</span>.<span class="m">168</span>.<span class="m">100</span>.<span class="m">200</span>,<span class="m">12</span><span class="n">h</span>
+<span class="n">dhcp</span>-<span class="n">option</span>=<span class="m">3</span>,<span class="m">192</span>.<span class="m">168</span>.<span class="m">100</span>.<span class="m">1</span>        <span class="c"># Default gateway
+</span><span class="n">dhcp</span>-<span class="n">option</span>=<span class="m">6</span>,<span class="m">8</span>.<span class="m">8</span>.<span class="m">8</span>.<span class="m">8</span>,<span class="m">8</span>.<span class="m">8</span>.<span class="m">4</span>.<span class="m">4</span>      <span class="c"># DNS servers
+</span><span class="n">dhcp</span>-<span class="n">authoritative</span>
+</code></pre></div></div>
+
+<h2 id="iot-application-scenarios">IoT Application Scenarios</h2>
+
+<h3 id="smart-agriculture">Smart Agriculture</h3>
+
+<div class="language-python highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c1"># Agricultural sensor mesh network
+</span><span class="k">class</span> <span class="nc">SmartFarmMesh</span><span class="p">:</span>
+    <span class="k">def</span> <span class="nf">deploy_sensor_network</span><span class="p">(</span><span class="n">self</span><span class="p">):</span>
+        <span class="sh">"""</span><span class="s">
+        Large-scale agricultural monitoring
+        - Soil sensors: moisture, temperature, pH
+        - Weather stations: rainfall, wind, humidity  
+        - Irrigation control: valves, pumps
+        - Coverage: 10-50 hectare single mesh
+        </span><span class="sh">"""</span>
+        <span class="n">sensors</span> <span class="o">=</span> <span class="p">{</span>
+            <span class="sh">'</span><span class="s">soil_nodes</span><span class="sh">'</span><span class="p">:</span> <span class="n">self</span><span class="p">.</span><span class="nf">deploy_soil_sensors</span><span class="p">(</span><span class="n">spacing</span><span class="o">=</span><span class="mi">200</span><span class="p">),</span>      <span class="c1"># 200m spacing
+</span>            <span class="sh">'</span><span class="s">weather_nodes</span><span class="sh">'</span><span class="p">:</span> <span class="n">self</span><span class="p">.</span><span class="nf">deploy_weather_stations</span><span class="p">(</span><span class="n">count</span><span class="o">=</span><span class="mi">4</span><span class="p">),</span>   <span class="c1"># 4 weather stations
+</span>            <span class="sh">'</span><span class="s">irrigation_nodes</span><span class="sh">'</span><span class="p">:</span> <span class="n">self</span><span class="p">.</span><span class="nf">deploy_irrigation_control</span><span class="p">(</span><span class="n">zones</span><span class="o">=</span><span class="mi">8</span><span class="p">)</span> <span class="c1"># 8 irrigation zones
+</span>        <span class="p">}</span>
+        
+        <span class="c1"># Configure mesh for maximum range
+</span>        <span class="n">self</span><span class="p">.</span><span class="nf">configure_mesh</span><span class="p">(</span>
+            <span class="n">channel_bw</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span>      <span class="c1"># 1MHz for maximum range
+</span>            <span class="n">power_save</span><span class="o">=</span><span class="bp">True</span><span class="p">,</span>   <span class="c1"># Battery optimization
+</span>            <span class="n">beacon_interval</span><span class="o">=</span><span class="mi">500</span> <span class="c1"># Extended beacon interval
+</span>        <span class="p">)</span>
+</code></pre></div></div>
+
+<h3 id="smart-city-infrastructure">Smart City Infrastructure</h3>
+
+<div class="language-python highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c1"># Urban infrastructure monitoring mesh
+</span><span class="k">class</span> <span class="nc">SmartCityMesh</span><span class="p">:</span>
+    <span class="k">def</span> <span class="nf">deploy_city_network</span><span class="p">(</span><span class="n">self</span><span class="p">):</span>
+        <span class="sh">"""</span><span class="s">
+        City-wide infrastructure monitoring
+        - Air quality: PM2.5, ozone, NO2 sensors
+        - Traffic monitoring: vehicle counters, parking sensors
+        - Street lighting: intelligent control systems
+        - Coverage: City-wide backbone mesh
+        </span><span class="sh">"""</span>
+        <span class="n">infrastructure</span> <span class="o">=</span> <span class="p">{</span>
+            <span class="sh">'</span><span class="s">air_quality</span><span class="sh">'</span><span class="p">:</span> <span class="n">self</span><span class="p">.</span><span class="nf">deploy_air_sensors</span><span class="p">(</span><span class="n">density</span><span class="o">=</span><span class="sh">'</span><span class="s">high</span><span class="sh">'</span><span class="p">),</span>
+            <span class="sh">'</span><span class="s">traffic_monitoring</span><span class="sh">'</span><span class="p">:</span> <span class="n">self</span><span class="p">.</span><span class="nf">deploy_traffic_sensors</span><span class="p">(),</span>
+            <span class="sh">'</span><span class="s">smart_lighting</span><span class="sh">'</span><span class="p">:</span> <span class="n">self</span><span class="p">.</span><span class="nf">deploy_light_controllers</span><span class="p">(),</span>
+            <span class="sh">'</span><span class="s">emergency_systems</span><span class="sh">'</span><span class="p">:</span> <span class="n">self</span><span class="p">.</span><span class="nf">deploy_emergency_nodes</span><span class="p">()</span>
+        <span class="p">}</span>
+        
+        <span class="c1"># Optimize for urban environment
+</span>        <span class="n">self</span><span class="p">.</span><span class="nf">configure_urban_mesh</span><span class="p">(</span>
+            <span class="n">interference_mitigation</span><span class="o">=</span><span class="bp">True</span><span class="p">,</span>
+            <span class="n">high_density_mode</span><span class="o">=</span><span class="bp">True</span><span class="p">,</span>
+            <span class="n">fast_roaming</span><span class="o">=</span><span class="bp">True</span>
+        <span class="p">)</span>
+</code></pre></div></div>
+
+<h3 id="industrial-automation">Industrial Automation</h3>
+
+<div class="language-python highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c1"># Factory automation mesh network
+</span><span class="k">class</span> <span class="nc">IndustrialMesh</span><span class="p">:</span>
+    <span class="k">def</span> <span class="nf">deploy_factory_network</span><span class="p">(</span><span class="n">self</span><span class="p">):</span>
+        <span class="sh">"""</span><span class="s">
+        Industrial automation and monitoring
+        - Machine sensors: vibration, temperature, pressure
+        - Asset tracking: RFID readers, location beacons
+        - Safety systems: gas detection, fire alarms
+        - Coverage: Complete factory building
+        </span><span class="sh">"""</span>
+        <span class="n">systems</span> <span class="o">=</span> <span class="p">{</span>
+            <span class="sh">'</span><span class="s">machine_monitoring</span><span class="sh">'</span><span class="p">:</span> <span class="n">self</span><span class="p">.</span><span class="nf">deploy_machine_sensors</span><span class="p">(),</span>
+            <span class="sh">'</span><span class="s">asset_tracking</span><span class="sh">'</span><span class="p">:</span> <span class="n">self</span><span class="p">.</span><span class="nf">deploy_tracking_nodes</span><span class="p">(),</span>
+            <span class="sh">'</span><span class="s">safety_systems</span><span class="sh">'</span><span class="p">:</span> <span class="n">self</span><span class="p">.</span><span class="nf">deploy_safety_sensors</span><span class="p">(),</span>
+            <span class="sh">'</span><span class="s">quality_control</span><span class="sh">'</span><span class="p">:</span> <span class="n">self</span><span class="p">.</span><span class="nf">deploy_qc_stations</span><span class="p">()</span>
+        <span class="p">}</span>
+        
+        <span class="c1"># Industrial environment optimization
+</span>        <span class="n">self</span><span class="p">.</span><span class="nf">configure_industrial_mesh</span><span class="p">(</span>
+            <span class="n">reliability_mode</span><span class="o">=</span><span class="sh">'</span><span class="s">high</span><span class="sh">'</span><span class="p">,</span>
+            <span class="n">latency_optimization</span><span class="o">=</span><span class="bp">True</span><span class="p">,</span>
+            <span class="n">interference_resistance</span><span class="o">=</span><span class="bp">True</span>
+        <span class="p">)</span>
+</code></pre></div></div>
+
+<h2 id="performance-characteristics">Performance Characteristics</h2>
+
+<h3 id="scalability-features">Scalability Features</h3>
+
+<div class="language-c highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c1">// IEEE 802.11s standard capabilities</span>
+<span class="n">Max</span> <span class="n">mesh</span> <span class="n">hops</span><span class="o">:</span>          <span class="mi">32</span> <span class="n">hops</span>
+<span class="n">Path</span> <span class="n">selection</span> <span class="n">metric</span><span class="o">:</span>  <span class="n">Airtime</span> <span class="n">link</span> <span class="n">metric</span>
+<span class="n">Load</span> <span class="n">balancing</span><span class="o">:</span>         <span class="n">Multi</span><span class="o">-</span><span class="n">path</span> <span class="n">support</span>
+<span class="n">Recovery</span> <span class="n">mechanism</span><span class="o">:</span>     <span class="n">Automatic</span> <span class="n">bypass</span> <span class="n">on</span> <span class="n">failure</span>
+<span class="n">Max</span> <span class="n">mesh</span> <span class="n">peers</span><span class="o">:</span>         <span class="n">Limited</span> <span class="n">by</span> <span class="n">memory</span> <span class="n">and</span> <span class="n">processing</span>
+</code></pre></div></div>
+
+<h3 id="iot-optimization-features">IoT Optimization Features</h3>
+
+<div class="language-python highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">class</span> <span class="nc">IoTMeshOptimizer</span><span class="p">:</span>
+    <span class="k">def</span> <span class="nf">optimize_for_sensors</span><span class="p">(</span><span class="n">self</span><span class="p">):</span>
+        <span class="sh">"""</span><span class="s">
+        Optimization for sensor networks
+        - Low latency for critical data
+        - High node density support  
+        - Stable path maintenance
+        - Power efficiency
+        </span><span class="sh">"""</span>
+        <span class="n">self</span><span class="p">.</span><span class="nf">set_beacon_interval</span><span class="p">(</span><span class="mi">100</span><span class="p">)</span>      <span class="c1"># Fast neighbor discovery
+</span>        <span class="n">self</span><span class="p">.</span><span class="nf">set_path_refresh</span><span class="p">(</span><span class="mi">30000</span><span class="p">)</span>       <span class="c1"># 30-second path refresh
+</span>        <span class="n">self</span><span class="p">.</span><span class="nf">enable_power_save</span><span class="p">(</span><span class="bp">True</span><span class="p">)</span>       <span class="c1"># Battery optimization
+</span>        <span class="n">self</span><span class="p">.</span><span class="nf">set_retry_limit</span><span class="p">(</span><span class="mi">2</span><span class="p">)</span>            <span class="c1"># Quick failure detection
+</span>        
+    <span class="k">def</span> <span class="nf">optimize_for_multimedia</span><span class="p">(</span><span class="n">self</span><span class="p">):</span>
+        <span class="sh">"""</span><span class="s">
+        Optimization for multimedia applications
+        - High throughput requirements
+        - QoS prioritization
+        - Bandwidth management
+        </span><span class="sh">"""</span>
+        <span class="n">self</span><span class="p">.</span><span class="nf">set_channel_width</span><span class="p">(</span><span class="mi">4</span><span class="p">)</span>          <span class="c1"># 4MHz for high throughput  
+</span>        <span class="n">self</span><span class="p">.</span><span class="nf">enable_ampdu</span><span class="p">(</span><span class="bp">True</span><span class="p">)</span>            <span class="c1"># Aggregation for efficiency
+</span>        <span class="n">self</span><span class="p">.</span><span class="nf">configure_qos_strict</span><span class="p">()</span>        <span class="c1"># Strict QoS enforcement
+</span></code></pre></div></div>
+
+<h2 id="advantages-over-conventional-wifi-mesh">Advantages Over Conventional WiFi Mesh</h2>
+
+<h3 id="coverage-and-range">Coverage and Range</h3>
+
+<div class="language-c highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c1">// Range comparison analysis</span>
+<span class="n">Conventional</span> <span class="n">WiFi</span> <span class="n">mesh</span> <span class="p">(</span><span class="mi">2</span><span class="p">.</span><span class="mi">4</span><span class="o">/</span><span class="mi">5</span><span class="n">GHz</span><span class="p">)</span><span class="o">:</span>
+<span class="o">-</span> <span class="n">Inter</span><span class="o">-</span><span class="n">node</span> <span class="n">distance</span><span class="o">:</span> <span class="o">~</span><span class="mi">100</span><span class="n">m</span>
+<span class="o">-</span> <span class="n">Wall</span> <span class="n">penetration</span><span class="o">:</span> <span class="mi">2</span><span class="o">-</span><span class="mi">3</span> <span class="n">walls</span>
+<span class="o">-</span> <span class="n">Outdoor</span> <span class="n">range</span><span class="o">:</span> <span class="n">Limited</span> <span class="n">by</span> <span class="n">interference</span>
+
+<span class="n">HaLow</span> <span class="n">mesh</span> <span class="p">(</span><span class="n">Sub</span><span class="o">-</span><span class="mi">1</span><span class="n">GHz</span><span class="p">)</span><span class="o">:</span>  
+<span class="o">-</span> <span class="n">Inter</span><span class="o">-</span><span class="n">node</span> <span class="n">distance</span><span class="o">:</span> <span class="o">~</span><span class="mi">1</span><span class="n">km</span> <span class="p">(</span><span class="mi">10</span><span class="n">x</span> <span class="n">improvement</span><span class="p">)</span>
+<span class="o">-</span> <span class="n">Wall</span> <span class="n">penetration</span><span class="o">:</span> <span class="mi">5</span><span class="o">-</span><span class="mi">10</span> <span class="n">walls</span>
+<span class="o">-</span> <span class="n">Outdoor</span> <span class="n">range</span><span class="o">:</span> <span class="n">Excellent</span> <span class="n">propagation</span>
+</code></pre></div></div>
+
+<h3 id="battery-life">Battery Life</h3>
+
+<div class="language-c highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c1">// Power consumption comparison</span>
+<span class="n">Conventional</span> <span class="n">WiFi</span> <span class="n">mesh</span><span class="o">:</span>
+<span class="o">-</span> <span class="n">Battery</span> <span class="n">life</span><span class="o">:</span> <span class="n">Days</span> <span class="n">to</span> <span class="n">weeks</span>
+<span class="o">-</span> <span class="n">Power</span> <span class="n">consumption</span><span class="o">:</span> <span class="n">High</span> <span class="n">due</span> <span class="n">to</span> <span class="n">frequent</span> <span class="n">beaconing</span>
+
+<span class="n">HaLow</span> <span class="n">mesh</span><span class="o">:</span>
+<span class="o">-</span> <span class="n">Battery</span> <span class="n">life</span><span class="o">:</span> <span class="n">Months</span> <span class="n">to</span> <span class="n">years</span> <span class="p">(</span><span class="mi">10</span><span class="n">x</span> <span class="n">improvement</span><span class="p">)</span>  
+<span class="o">-</span> <span class="n">Power</span> <span class="n">consumption</span><span class="o">:</span> <span class="n">Optimized</span> <span class="k">for</span> <span class="n">IoT</span> <span class="n">applications</span>
+</code></pre></div></div>
+
+<h3 id="device-density">Device Density</h3>
+
+<div class="language-c highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c1">// Supported device comparison</span>
+<span class="n">Conventional</span> <span class="n">WiFi</span> <span class="n">mesh</span><span class="o">:</span>   <span class="o">~</span><span class="mi">50</span><span class="o">-</span><span class="mi">100</span> <span class="n">devices</span> <span class="n">per</span> <span class="n">node</span>
+<span class="n">HaLow</span> <span class="n">mesh</span><span class="o">:</span>              <span class="o">~</span><span class="mi">1000</span><span class="o">-</span><span class="mi">8000</span> <span class="n">devices</span> <span class="n">per</span> <span class="n">node</span>
+
+<span class="n">Application</span> <span class="n">benefits</span><span class="o">:</span>
+<span class="o">-</span> <span class="n">Large</span><span class="o">-</span><span class="n">scale</span> <span class="n">sensor</span> <span class="n">networks</span>
+<span class="o">-</span> <span class="n">Smart</span> <span class="n">city</span> <span class="n">infrastructure</span>  
+<span class="o">-</span> <span class="n">Industrial</span> <span class="n">IoT</span> <span class="n">monitoring</span>
+<span class="o">-</span> <span class="n">Agricultural</span> <span class="n">automation</span>
+</code></pre></div></div>
+
+<h2 id="conclusion">Conclusion</h2>
+
+<p>The NRC7292 HaLow mesh implementation represents a significant advancement in IoT networking technology. Key advantages include:</p>
+
+<ol>
+  <li><strong>Extended Coverage</strong>: 10x range improvement enables sparse infrastructure deployment</li>
+  <li><strong>Enhanced Battery Life</strong>: Years of operation for battery-powered nodes</li>
+  <li><strong>Superior Penetration</strong>: Reliable indoor and underground connectivity</li>
+  <li><strong>Massive Scalability</strong>: Support for thousands of devices per access point</li>
+  <li><strong>IEEE 802.11s Compliance</strong>: Full standards compliance with vendor interoperability</li>
+</ol>
+
+<p>These characteristics make NRC7292 HaLow mesh the ideal solution for large-scale IoT deployments that would be impractical with conventional WiFi mesh technology.</p>
+
+<hr />
+
+<p><em>For complete mesh networking configuration examples and deployment guides, refer to the <a href="https://github.com/oyongjoo/nrc7292-analysis">NRC7292 analysis repository</a>.</em></p>]]></content><author><name>Liam Lee</name></author><category term="Networking" /><category term="mesh" /><category term="802.11s" /><category term="halow" /><category term="iot" /><category term="hwmp" /><category term="batman-adv" /><summary type="html"><![CDATA[Detailed analysis of IEEE 802.11s mesh networking implementation in NRC7292 HaLow driver, including IoT optimizations and real-world deployment scenarios.]]></summary></entry><entry><title type="html">NRC7292 TX Path Detailed Analysis</title><link href="http://0.0.0.0:4000/2025/06/17/nrc7292-tx-path-analysis/" rel="alternate" type="text/html" title="NRC7292 TX Path Detailed Analysis" /><published>2025-06-17T00:00:00+09:00</published><updated>2025-06-17T00:00:00+09:00</updated><id>http://0.0.0.0:4000/2025/06/17/nrc7292-tx-path-analysis</id><content type="html" xml:base="http://0.0.0.0:4000/2025/06/17/nrc7292-tx-path-analysis/"><![CDATA[<h1 id="nrc7292-tx-path-detailed-analysis">NRC7292 TX Path Detailed Analysis</h1>
+
+<p>This post provides a comprehensive analysis of the TX (transmission) path in the NRC7292 HaLow (IEEE 802.11ah) driver, covering the entire data flow from mac80211 kernel framework to hardware transmission.</p>
+
+<h2 id="tx-entry-point-nrc_mac_tx-function">TX Entry Point: <code class="language-plaintext highlighter-rouge">nrc_mac_tx</code> Function</h2>
+
+<p>The TX path begins at <code class="language-plaintext highlighter-rouge">nrc_mac_tx</code> function in <code class="language-plaintext highlighter-rouge">nrc-trx.c</code>:</p>
+
+<div class="language-c highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="cp">#ifdef CONFIG_SUPPORT_NEW_MAC_TX
+</span><span class="kt">void</span> <span class="n">nrc_mac_tx</span><span class="p">(</span><span class="k">struct</span> <span class="n">ieee80211_hw</span> <span class="o">*</span><span class="n">hw</span><span class="p">,</span> <span class="k">struct</span> <span class="n">ieee80211_tx_control</span> <span class="o">*</span><span class="n">control</span><span class="p">,</span>
+        <span class="k">struct</span> <span class="n">sk_buff</span> <span class="o">*</span><span class="n">skb</span><span class="p">)</span>
+<span class="cp">#else
+</span><span class="kt">void</span> <span class="n">nrc_mac_tx</span><span class="p">(</span><span class="k">struct</span> <span class="n">ieee80211_hw</span> <span class="o">*</span><span class="n">hw</span><span class="p">,</span>
+        <span class="k">struct</span> <span class="n">sk_buff</span> <span class="o">*</span><span class="n">skb</span><span class="p">)</span>
+<span class="cp">#endif
+</span></code></pre></div></div>
+
+<h3 id="parameter-analysis">Parameter Analysis</h3>
+
+<ul>
+  <li><strong><code class="language-plaintext highlighter-rouge">ieee80211_hw *hw</code></strong>: mac80211 hardware abstraction providing driver context via <code class="language-plaintext highlighter-rouge">hw-&gt;priv</code></li>
+  <li><strong><code class="language-plaintext highlighter-rouge">ieee80211_tx_control *control</code></strong>: TX control information for newer kernel versions</li>
+  <li><strong><code class="language-plaintext highlighter-rouge">sk_buff *skb</code></strong>: Packet data containing IEEE 802.11 frame with metadata via <code class="language-plaintext highlighter-rouge">IEEE80211_SKB_CB(skb)</code></li>
+</ul>
+
+<h2 id="tx-tasklet-mechanism">TX Tasklet Mechanism</h2>
+
+<h3 id="initialization">Initialization</h3>
+
+<p>The TX tasklet is configured during driver initialization (<code class="language-plaintext highlighter-rouge">nrc-init.c:816-822</code>):</p>
+
+<div class="language-c highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="cp">#ifdef CONFIG_USE_TXQ
+#ifdef CONFIG_NEW_TASKLET_API
+</span>    <span class="n">tasklet_setup</span><span class="p">(</span><span class="o">&amp;</span><span class="n">nw</span><span class="o">-&gt;</span><span class="n">tx_tasklet</span><span class="p">,</span> <span class="n">nrc_tx_tasklet</span><span class="p">);</span>
+<span class="cp">#else
+</span>    <span class="n">tasklet_init</span><span class="p">(</span><span class="o">&amp;</span><span class="n">nw</span><span class="o">-&gt;</span><span class="n">tx_tasklet</span><span class="p">,</span> <span class="n">nrc_tx_tasklet</span><span class="p">,</span> <span class="p">(</span><span class="kt">unsigned</span> <span class="kt">long</span><span class="p">)</span> <span class="n">nw</span><span class="p">);</span>
+<span class="cp">#endif
+#endif
+</span></code></pre></div></div>
+
+<p><strong>Kernel API Compatibility:</strong></p>
+<ul>
+  <li><code class="language-plaintext highlighter-rouge">tasklet_setup()</code>: New kernel API (5.0+) with type safety</li>
+  <li><code class="language-plaintext highlighter-rouge">tasklet_init()</code>: Legacy API using unsigned long parameter</li>
+</ul>
+
+<h3 id="implementation">Implementation</h3>
+
+<p>The TX tasklet provides bottom-half processing for sequential packet transmission:</p>
+
+<div class="language-c highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="kt">void</span> <span class="nf">nrc_tx_tasklet</span><span class="p">(</span><span class="k">struct</span> <span class="n">tasklet_struct</span> <span class="o">*</span><span class="n">t</span><span class="p">)</span>
+<span class="p">{</span>
+    <span class="k">struct</span> <span class="n">nrc</span> <span class="o">*</span><span class="n">nw</span> <span class="o">=</span> <span class="n">from_tasklet</span><span class="p">(</span><span class="n">nw</span><span class="p">,</span> <span class="n">t</span><span class="p">,</span> <span class="n">tx_tasklet</span><span class="p">);</span>
+    <span class="k">struct</span> <span class="n">nrc_txq</span> <span class="o">*</span><span class="n">ntxq</span><span class="p">,</span> <span class="o">*</span><span class="n">tmp</span><span class="p">;</span>
+    <span class="kt">int</span> <span class="n">ret</span><span class="p">;</span>
+
+    <span class="n">spin_lock_bh</span><span class="p">(</span><span class="o">&amp;</span><span class="n">nw</span><span class="o">-&gt;</span><span class="n">txq_lock</span><span class="p">);</span>
+
+    <span class="n">list_for_each_entry_safe</span><span class="p">(</span><span class="n">ntxq</span><span class="p">,</span> <span class="n">tmp</span><span class="p">,</span> <span class="o">&amp;</span><span class="n">nw</span><span class="o">-&gt;</span><span class="n">txq</span><span class="p">,</span> <span class="n">list</span><span class="p">)</span> <span class="p">{</span>
+        <span class="n">ret</span> <span class="o">=</span> <span class="n">nrc_push_txq</span><span class="p">(</span><span class="n">nw</span><span class="p">,</span> <span class="n">ntxq</span><span class="p">);</span>
+        <span class="k">if</span> <span class="p">(</span><span class="n">ret</span> <span class="o">==</span> <span class="mi">0</span><span class="p">)</span> <span class="p">{</span>
+            <span class="n">list_del_init</span><span class="p">(</span><span class="o">&amp;</span><span class="n">ntxq</span><span class="o">-&gt;</span><span class="n">list</span><span class="p">);</span>  <span class="c1">// All packets sent</span>
+        <span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+            <span class="n">list_move_tail</span><span class="p">(</span><span class="o">&amp;</span><span class="n">ntxq</span><span class="o">-&gt;</span><span class="n">list</span><span class="p">,</span> <span class="o">&amp;</span><span class="n">nw</span><span class="o">-&gt;</span><span class="n">txq</span><span class="p">);</span>  <span class="c1">// Round-robin</span>
+            <span class="k">break</span><span class="p">;</span>
+        <span class="p">}</span>
+    <span class="p">}</span>
+
+    <span class="n">spin_unlock_bh</span><span class="p">(</span><span class="o">&amp;</span><span class="n">nw</span><span class="o">-&gt;</span><span class="n">txq_lock</span><span class="p">);</span>
+<span class="p">}</span>
+</code></pre></div></div>
+
+<p><strong>Key Features:</strong></p>
+<ol>
+  <li><strong>Round-robin Scheduling</strong>: Fair processing between TXQs</li>
+  <li><strong>Spinlock Protection</strong>: Concurrency control with <code class="language-plaintext highlighter-rouge">txq_lock</code></li>
+  <li><strong>Credit-aware Processing</strong>: Stops when hardware buffers full</li>
+</ol>
+
+<h2 id="credit-based-flow-control">Credit-Based Flow Control</h2>
+
+<h3 id="credit-calculation">Credit Calculation</h3>
+
+<p>NRC7292 uses a sophisticated credit system for hardware buffer management:</p>
+
+<div class="language-c highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="n">credit</span> <span class="o">=</span> <span class="n">DIV_ROUND_UP</span><span class="p">(</span><span class="n">skb</span><span class="o">-&gt;</span><span class="n">len</span><span class="p">,</span> <span class="n">nw</span><span class="o">-&gt;</span><span class="n">fwinfo</span><span class="p">.</span><span class="n">buffer_size</span><span class="p">);</span>
+</code></pre></div></div>
+
+<h3 id="per-ac-credit-allocation">Per-AC Credit Allocation</h3>
+
+<div class="language-c highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="cp">#define CREDIT_AC0      (TCN*2+TCNE)    </span><span class="cm">/* BK (4) */</span><span class="cp">
+#define CREDIT_AC1      (TCN*20+TCNE)   </span><span class="cm">/* BE (40) */</span><span class="cp">
+#define CREDIT_AC2      (TCN*4+TCNE)    </span><span class="cm">/* VI (8) */</span><span class="cp">
+#define CREDIT_AC3      (TCN*4+TCNE)    </span><span class="cm">/* VO (8) */</span><span class="cp">
+</span></code></pre></div></div>
+
+<h3 id="credit-update-mechanism">Credit Update Mechanism</h3>
+
+<p>Firmware reports credit availability via WIM messages:</p>
+
+<div class="language-c highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">static</span> <span class="kt">int</span> <span class="nf">nrc_wim_update_tx_credit</span><span class="p">(</span><span class="k">struct</span> <span class="n">nrc</span> <span class="o">*</span><span class="n">nw</span><span class="p">,</span> <span class="k">struct</span> <span class="n">wim</span> <span class="o">*</span><span class="n">wim</span><span class="p">)</span>
+<span class="p">{</span>
+    <span class="k">struct</span> <span class="n">wim_credit_report</span> <span class="o">*</span><span class="n">r</span> <span class="o">=</span> <span class="p">(</span><span class="kt">void</span> <span class="o">*</span><span class="p">)(</span><span class="n">wim</span> <span class="o">+</span> <span class="mi">1</span><span class="p">);</span>
+    <span class="kt">int</span> <span class="n">ac</span><span class="p">;</span>
+    
+    <span class="k">for</span> <span class="p">(</span><span class="n">ac</span> <span class="o">=</span> <span class="mi">0</span><span class="p">;</span> <span class="n">ac</span> <span class="o">&lt;</span> <span class="p">(</span><span class="n">IEEE80211_NUM_ACS</span><span class="o">*</span><span class="mi">3</span><span class="p">);</span> <span class="n">ac</span><span class="o">++</span><span class="p">)</span>
+        <span class="n">atomic_set</span><span class="p">(</span><span class="o">&amp;</span><span class="n">nw</span><span class="o">-&gt;</span><span class="n">tx_credit</span><span class="p">[</span><span class="n">ac</span><span class="p">],</span> <span class="n">r</span><span class="o">-&gt;</span><span class="n">v</span><span class="p">.</span><span class="n">ac</span><span class="p">[</span><span class="n">ac</span><span class="p">]);</span>
+    
+    <span class="n">nrc_kick_txq</span><span class="p">(</span><span class="n">nw</span><span class="p">);</span>  <span class="c1">// Schedule tasklet</span>
+    <span class="k">return</span> <span class="mi">0</span><span class="p">;</span>
+<span class="p">}</span>
+</code></pre></div></div>
+
+<h2 id="ampdu-block-ack-session-management">AMPDU Block ACK Session Management</h2>
+
+<h3 id="automatic-ba-session-setup">Automatic BA Session Setup</h3>
+
+<p>The <code class="language-plaintext highlighter-rouge">setup_ba_session()</code> function manages automatic AMPDU establishment:</p>
+
+<div class="language-c highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">static</span> <span class="kt">void</span> <span class="nf">setup_ba_session</span><span class="p">(</span><span class="k">struct</span> <span class="n">nrc</span> <span class="o">*</span><span class="n">nw</span><span class="p">,</span> <span class="k">struct</span> <span class="n">ieee80211_vif</span> <span class="o">*</span><span class="n">vif</span><span class="p">,</span> <span class="k">struct</span> <span class="n">sk_buff</span> <span class="o">*</span><span class="n">skb</span><span class="p">)</span>
+<span class="p">{</span>
+    <span class="k">struct</span> <span class="n">ieee80211_sta</span> <span class="o">*</span><span class="n">peer_sta</span> <span class="o">=</span> <span class="nb">NULL</span><span class="p">;</span>
+    <span class="k">struct</span> <span class="n">nrc_sta</span> <span class="o">*</span><span class="n">i_sta</span> <span class="o">=</span> <span class="nb">NULL</span><span class="p">;</span>
+    <span class="k">struct</span> <span class="n">ieee80211_hdr</span> <span class="o">*</span><span class="n">qmh</span> <span class="o">=</span> <span class="p">(</span><span class="k">struct</span> <span class="n">ieee80211_hdr</span> <span class="o">*</span><span class="p">)</span> <span class="n">skb</span><span class="o">-&gt;</span><span class="n">data</span><span class="p">;</span>
+    <span class="kt">int</span> <span class="n">tid</span> <span class="o">=</span> <span class="o">*</span><span class="n">ieee80211_get_qos_ctl</span><span class="p">(</span><span class="n">qmh</span><span class="p">)</span> <span class="o">&amp;</span> <span class="n">IEEE80211_QOS_CTL_TID_MASK</span><span class="p">;</span>
+    
+    <span class="c1">// 1. Fragmentation check</span>
+    <span class="k">if</span> <span class="p">(</span><span class="n">nw</span><span class="o">-&gt;</span><span class="n">frag_threshold</span> <span class="o">!=</span> <span class="o">-</span><span class="mi">1</span><span class="p">)</span> <span class="k">return</span><span class="p">;</span>
+    
+    <span class="c1">// 2. TID validation</span>
+    <span class="k">if</span> <span class="p">(</span><span class="n">tid</span> <span class="o">&lt;</span> <span class="mi">0</span> <span class="o">||</span> <span class="n">tid</span> <span class="o">&gt;=</span> <span class="n">NRC_MAX_TID</span><span class="p">)</span> <span class="k">return</span><span class="p">;</span>
+    
+    <span class="c1">// 3. Find destination station</span>
+    <span class="n">peer_sta</span> <span class="o">=</span> <span class="n">ieee80211_find_sta</span><span class="p">(</span><span class="n">vif</span><span class="p">,</span> <span class="n">qmh</span><span class="o">-&gt;</span><span class="n">addr1</span><span class="p">);</span>
+    <span class="k">if</span> <span class="p">(</span><span class="o">!</span><span class="n">peer_sta</span><span class="p">)</span> <span class="k">return</span><span class="p">;</span>
+    
+    <span class="c1">// 4. Get NRC station context</span>
+    <span class="n">i_sta</span> <span class="o">=</span> <span class="n">to_i_sta</span><span class="p">(</span><span class="n">peer_sta</span><span class="p">);</span>
+    <span class="k">if</span> <span class="p">(</span><span class="o">!</span><span class="n">i_sta</span><span class="p">)</span> <span class="k">return</span><span class="p">;</span>
+    
+    <span class="c1">// 5. State machine handling</span>
+    <span class="k">switch</span> <span class="p">(</span><span class="n">i_sta</span><span class="o">-&gt;</span><span class="n">tx_ba_session</span><span class="p">[</span><span class="n">tid</span><span class="p">])</span> <span class="p">{</span>
+        <span class="k">case</span> <span class="n">IEEE80211_BA_NONE</span><span class="p">:</span>
+        <span class="k">case</span> <span class="n">IEEE80211_BA_CLOSE</span><span class="p">:</span>
+            <span class="n">ret</span> <span class="o">=</span> <span class="n">ieee80211_start_tx_ba_session</span><span class="p">(</span><span class="n">peer_sta</span><span class="p">,</span> <span class="n">tid</span><span class="p">,</span> <span class="mi">0</span><span class="p">);</span>
+            <span class="k">break</span><span class="p">;</span>
+        <span class="k">case</span> <span class="n">IEEE80211_BA_REJECT</span><span class="p">:</span>
+            <span class="c1">// Retry after 5 seconds</span>
+            <span class="k">if</span> <span class="p">(</span><span class="n">jiffies_to_msecs</span><span class="p">(</span><span class="n">jiffies</span> <span class="o">-</span> <span class="n">i_sta</span><span class="o">-&gt;</span><span class="n">ba_req_last_jiffies</span><span class="p">[</span><span class="n">tid</span><span class="p">])</span> <span class="o">&gt;</span> <span class="mi">5000</span><span class="p">)</span> <span class="p">{</span>
+                <span class="n">i_sta</span><span class="o">-&gt;</span><span class="n">tx_ba_session</span><span class="p">[</span><span class="n">tid</span><span class="p">]</span> <span class="o">=</span> <span class="n">IEEE80211_BA_NONE</span><span class="p">;</span>
+            <span class="p">}</span>
+            <span class="k">break</span><span class="p">;</span>
+    <span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div></div>
+
+<h2 id="drv_priv-structure-analysis">drv_priv Structure Analysis</h2>
+
+<h3 id="the-to_i_sta-macro">The <code class="language-plaintext highlighter-rouge">to_i_sta()</code> Macro</h3>
+
+<div class="language-c highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="cp">#define to_i_sta(s) ((struct nrc_sta *) (s)-&gt;drv_priv)
+</span></code></pre></div></div>
+
+<h3 id="nrc-station-structure">NRC Station Structure</h3>
+
+<div class="language-c highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">struct</span> <span class="n">nrc_sta</span> <span class="p">{</span>
+    <span class="k">struct</span> <span class="n">nrc</span> <span class="o">*</span><span class="n">nw</span><span class="p">;</span>                              <span class="c1">// Driver context</span>
+    <span class="k">struct</span> <span class="n">ieee80211_vif</span> <span class="o">*</span><span class="n">vif</span><span class="p">;</span>                   <span class="c1">// Connected VIF</span>
+    
+    <span class="k">enum</span> <span class="n">ieee80211_sta_state</span> <span class="n">state</span><span class="p">;</span>              <span class="c1">// STA state</span>
+    <span class="k">struct</span> <span class="n">list_head</span> <span class="n">list</span><span class="p">;</span>                       <span class="c1">// List connection</span>
+    
+    <span class="cm">/* Security keys */</span>
+    <span class="k">struct</span> <span class="n">ieee80211_key_conf</span> <span class="o">*</span><span class="n">ptk</span><span class="p">;</span>              <span class="c1">// Pairwise key</span>
+    <span class="k">struct</span> <span class="n">ieee80211_key_conf</span> <span class="o">*</span><span class="n">gtk</span><span class="p">;</span>              <span class="c1">// Group key</span>
+    
+    <span class="cm">/* Power management */</span>
+    <span class="kt">uint16_t</span> <span class="n">listen_interval</span><span class="p">;</span>
+    <span class="k">struct</span> <span class="n">nrc_max_idle</span> <span class="n">max_idle</span><span class="p">;</span>
+    
+    <span class="cm">/* Per-TID Block ACK sessions */</span>
+    <span class="k">enum</span> <span class="n">ieee80211_tx_ba_state</span> <span class="n">tx_ba_session</span><span class="p">[</span><span class="n">NRC_MAX_TID</span><span class="p">];</span>
+    <span class="kt">uint32_t</span> <span class="n">ba_req_last_jiffies</span><span class="p">[</span><span class="n">NRC_MAX_TID</span><span class="p">];</span>
+    <span class="k">struct</span> <span class="n">rx_ba_session</span> <span class="n">rx_ba_session</span><span class="p">[</span><span class="n">NRC_MAX_TID</span><span class="p">];</span>
+<span class="p">};</span>
+</code></pre></div></div>
+
+<h3 id="memory-layout">Memory Layout</h3>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>[ieee80211_sta structure][struct nrc_sta (drv_priv)]
+                         ↑
+                         sta-&gt;drv_priv points here
+</code></pre></div></div>
+
+<h2 id="tx-handler-chain">TX Handler Chain</h2>
+
+<p>The TX path uses a modular handler chain defined at compile time:</p>
+
+<div class="language-c highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="cp">#define TXH(fn, mask)                   \
+    static struct nrc_trx_handler __txh_ ## fn \
+    __attribute((__section__("nrc.txh"))) = {  \
+        .handler = fn,              \
+        .vif_types = mask,          \
+    }
+</span></code></pre></div></div>
+
+<h3 id="major-tx-handlers">Major TX Handlers</h3>
+
+<ol>
+  <li><strong><code class="language-plaintext highlighter-rouge">tx_h_debug_print</code></strong>: Debug output (conditional)</li>
+  <li><strong><code class="language-plaintext highlighter-rouge">tx_h_debug_state</code></strong>: Station state verification</li>
+  <li><strong><code class="language-plaintext highlighter-rouge">tx_h_frame_filter</code></strong>: Frame type filtering</li>
+  <li><strong><code class="language-plaintext highlighter-rouge">tx_h_put_iv</code></strong>: Security IV header addition</li>
+  <li><strong><code class="language-plaintext highlighter-rouge">tx_h_put_qos_control</code></strong>: QoS control field management</li>
+</ol>
+
+<h2 id="hardware-transmission">Hardware Transmission</h2>
+
+<h3 id="hif-header-construction">HIF Header Construction</h3>
+
+<div class="language-c highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="n">hif</span> <span class="o">=</span> <span class="p">(</span><span class="kt">void</span> <span class="o">*</span><span class="p">)</span><span class="n">skb_push</span><span class="p">(</span><span class="n">skb</span><span class="p">,</span> <span class="n">nw</span><span class="o">-&gt;</span><span class="n">fwinfo</span><span class="p">.</span><span class="n">tx_head_size</span><span class="p">);</span>
+<span class="n">memset</span><span class="p">(</span><span class="n">hif</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="n">nw</span><span class="o">-&gt;</span><span class="n">fwinfo</span><span class="p">.</span><span class="n">tx_head_size</span><span class="p">);</span>
+<span class="n">hif</span><span class="o">-&gt;</span><span class="n">type</span> <span class="o">=</span> <span class="n">HIF_TYPE_FRAME</span><span class="p">;</span>
+<span class="n">hif</span><span class="o">-&gt;</span><span class="n">len</span> <span class="o">=</span> <span class="n">skb</span><span class="o">-&gt;</span><span class="n">len</span> <span class="o">-</span> <span class="k">sizeof</span><span class="p">(</span><span class="o">*</span><span class="n">hif</span><span class="p">);</span>
+<span class="n">hif</span><span class="o">-&gt;</span><span class="n">vifindex</span> <span class="o">=</span> <span class="n">vif_index</span><span class="p">;</span>
+</code></pre></div></div>
+
+<h3 id="cspi-interface">CSPI Interface</h3>
+
+<p>The Custom SPI (CSPI) protocol handles actual hardware transmission:</p>
+
+<div class="language-c highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="cm">/*
+ * [31:24]: start byte (0x50)
+ * [23:23]: burst (0: single, 1: burst)  
+ * [22:22]: direction (0: read, 1: write)
+ * [21:21]: fixed (0: incremental, 1: fixed)
+ * [20:13]: address
+ * [12:0]: length
+ */</span>
+<span class="cp">#define C_SPI_WRITE     0x50400000
+#define C_SPI_BURST     0x00800000
+</span></code></pre></div></div>
+
+<h2 id="performance-optimizations">Performance Optimizations</h2>
+
+<h3 id="zero-copy-processing">Zero-Copy Processing</h3>
+<ul>
+  <li>Efficient header addition using <code class="language-plaintext highlighter-rouge">skb_push()</code> and <code class="language-plaintext highlighter-rouge">skb_put()</code></li>
+  <li>Minimal memory copying through SKB headroom utilization</li>
+</ul>
+
+<h3 id="batch-processing">Batch Processing</h3>
+<ul>
+  <li>Workqueue-based sequential transmission</li>
+  <li>Priority-based queue processing for QoS</li>
+</ul>
+
+<h3 id="hardware-acceleration">Hardware Acceleration</h3>
+<ul>
+  <li>Firmware-level encryption support</li>
+  <li>Automatic AMPDU aggregation management</li>
+</ul>
+
+<h2 id="conclusion">Conclusion</h2>
+
+<p>The NRC7292 TX path demonstrates a sophisticated architecture optimized for HaLow’s IoT requirements:</p>
+
+<ol>
+  <li><strong>Efficient Tasklet Processing</strong>: Bottom-half processing with round-robin fairness</li>
+  <li><strong>Credit-Based Flow Control</strong>: Hardware buffer overflow prevention</li>
+  <li><strong>Automatic AMPDU Management</strong>: Intelligent Block ACK session handling</li>
+  <li><strong>Modular Handler Chain</strong>: Flexible processing pipeline</li>
+  <li><strong>Zero-Copy Optimization</strong>: High-performance packet processing</li>
+</ol>
+
+<p>This architecture effectively supports IEEE 802.11ah characteristics of low power, long range, and high device density while maintaining stability and performance across various network scenarios.</p>
+
+<hr />
+
+<p><em>This analysis is based on comprehensive source code review of the NRC7292 Linux kernel driver. For complete technical details, refer to the <a href="https://github.com/oyongjoo/nrc7292-analysis">source code analysis documentation</a>.</em></p>]]></content><author><name>Liam Lee</name></author><category term="Architecture" /><category term="tx-path" /><category term="tasklet" /><category term="credit-system" /><category term="ampdu" /><category term="source-code" /><summary type="html"><![CDATA[Comprehensive analysis of the NRC7292 HaLow driver TX transmission path, including tasklet mechanism, credit-based flow control, and AMPDU Block ACK session management.]]></summary></entry></feed>

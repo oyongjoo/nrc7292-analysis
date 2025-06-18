@@ -1,0 +1,11 @@
+{
+  "hosting": {
+    "public": "_site",
+    "ignore": [
+      "firebase.json",
+      "**/.*",
+      "**/node_modules/**",
+      "_site/nrc7292_sw_pkg/**"
+    ]
+  }
+}

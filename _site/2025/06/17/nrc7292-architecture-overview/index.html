@@ -1,0 +1,402 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>NRC7292 HaLow Driver Architecture Overview | NRC7292 Analysis Blog</title>
+    <link rel="stylesheet" href="/assets/css/style.css">
+</head>
+<body>
+    <header>
+        <h1><a href="/">NRC7292 Analysis Blog</a></h1>
+        <p>Code analysis and research documentation for NRC7292 HaLow driver</p>
+        <nav>
+            <a href="/">Home</a>
+            <a href="/posts/">All Posts</a>
+            <a href="https://github.com/oyongjoo/nrc7292-analysis">GitHub</a>
+        </nav>
+    </header>
+    <main>
+        <article>
+    <header>
+        <h1>NRC7292 HaLow Driver Architecture Overview</h1>
+        <time datetime="2025-06-17T00:00:00+09:00">
+            June 17, 2025
+        </time>
+        
+        <div class="tags">
+            
+                <span class="tag">architecture</span>
+            
+                <span class="tag">halow</span>
+            
+                <span class="tag">802.11ah</span>
+            
+                <span class="tag">kernel-driver</span>
+            
+                <span class="tag">overview</span>
+            
+        </div>
+        
+        
+        <div class="category">
+            Category: <span class="category-name">Architecture</span>
+        </div>
+        
+    </header>
+    <div class="content">
+        <h1 id="nrc7292-halow-driver-architecture-overview">NRC7292 HaLow Driver Architecture Overview</h1>
+
+<p>The NRC7292 is a comprehensive Linux kernel driver package for the IEEE 802.11ah HaLow chipset, designed specifically for IoT applications requiring long-range, low-power wireless connectivity.</p>
+
+<h2 id="overall-architecture">Overall Architecture</h2>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>┌─────────────────────────────────────────────────────────────┐
+│                    User Space Applications                   │
+├─────────────────────────────────────────────────────────────┤
+│                     mac80211 Framework                      │
+├─────────────────────────────────────────────────────────────┤
+│                    NRC7292 Driver Core                      │
+│  ┌───────────────┬─────────────────┬─────────────────────┐  │
+│  │  mac80211     │      WIM        │    Power Mgmt       │  │
+│  │  Interface    │    Protocol     │    &amp; Control        │  │
+│  └───────────────┼─────────────────┼─────────────────────┤  │
+│  │      TX/RX Processing Path      │   Hardware Abstraction│  │
+│  └─────────────────────────────────┼─────────────────────┘  │
+├─────────────────────────────────────┼─────────────────────────┤
+│                HIF (Hardware Interface)                     │
+├─────────────────────────────────────────────────────────────┤
+│                  CSPI (Custom SPI)                          │
+├─────────────────────────────────────────────────────────────┤
+│                    NRC7292 Firmware                        │
+└─────────────────────────────────────────────────────────────┘
+</code></pre></div></div>
+
+<h2 id="core-components">Core Components</h2>
+
+<h3 id="1-mac80211-integration-layer">1. mac80211 Integration Layer</h3>
+
+<p><strong>File</strong>: <code class="language-plaintext highlighter-rouge">nrc-mac80211.c/h</code></p>
+
+<p>The mac80211 interface layer bridges the Linux wireless framework with NRC-specific functionality:</p>
+
+<div class="language-c highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">static</span> <span class="k">const</span> <span class="k">struct</span> <span class="n">ieee80211_ops</span> <span class="n">nrc_ops</span> <span class="o">=</span> <span class="p">{</span>
+    <span class="p">.</span><span class="n">tx</span>                 <span class="o">=</span> <span class="n">nrc_mac_tx</span><span class="p">,</span>
+    <span class="p">.</span><span class="n">start</span>              <span class="o">=</span> <span class="n">nrc_mac_start</span><span class="p">,</span>
+    <span class="p">.</span><span class="n">stop</span>               <span class="o">=</span> <span class="n">nrc_mac_stop</span><span class="p">,</span>
+    <span class="p">.</span><span class="n">add_interface</span>      <span class="o">=</span> <span class="n">nrc_mac_add_interface</span><span class="p">,</span>
+    <span class="p">.</span><span class="n">remove_interface</span>   <span class="o">=</span> <span class="n">nrc_mac_remove_interface</span><span class="p">,</span>
+    <span class="p">.</span><span class="n">config</span>             <span class="o">=</span> <span class="n">nrc_mac_config</span><span class="p">,</span>
+    <span class="p">.</span><span class="n">bss_info_changed</span>   <span class="o">=</span> <span class="n">nrc_mac_bss_info_changed</span><span class="p">,</span>
+    <span class="p">.</span><span class="n">sta_state</span>          <span class="o">=</span> <span class="n">nrc_mac_sta_state</span><span class="p">,</span>
+    <span class="p">.</span><span class="n">conf_tx</span>            <span class="o">=</span> <span class="n">nrc_mac_conf_tx</span><span class="p">,</span>
+    <span class="p">.</span><span class="n">set_key</span>            <span class="o">=</span> <span class="n">nrc_mac_set_key</span><span class="p">,</span>
+    <span class="c1">// ... additional operations</span>
+<span class="p">};</span>
+</code></pre></div></div>
+
+<p><strong>Key Functions:</strong></p>
+<ul>
+  <li>Interface management (STA, AP, Mesh, Monitor modes)</li>
+  <li>TX/RX packet handling integration</li>
+  <li>Configuration and state management</li>
+  <li>Security key management</li>
+</ul>
+
+<h3 id="2-wim-wireless-interface-module-protocol">2. WIM (Wireless Interface Module) Protocol</h3>
+
+<p><strong>Files</strong>: <code class="language-plaintext highlighter-rouge">wim.c/h</code>, <code class="language-plaintext highlighter-rouge">nrc-wim-types.h</code></p>
+
+<p>WIM provides the communication protocol between the driver and firmware:</p>
+
+<div class="language-c highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">struct</span> <span class="n">wim</span> <span class="p">{</span>
+    <span class="n">u8</span> <span class="n">cmd</span><span class="p">;</span>           <span class="c1">// Command type</span>
+    <span class="n">u8</span> <span class="n">seqno</span><span class="p">;</span>         <span class="c1">// Sequence number</span>
+    <span class="n">u16</span> <span class="n">tlv_len</span><span class="p">;</span>      <span class="c1">// TLV payload length</span>
+    <span class="n">u32</span> <span class="n">flags</span><span class="p">;</span>        <span class="c1">// Control flags</span>
+<span class="p">}</span> <span class="n">__packed</span><span class="p">;</span>
+</code></pre></div></div>
+
+<p><strong>WIM Command Categories:</strong></p>
+<ul>
+  <li><strong>Configuration</strong>: Channel, power, regulatory settings</li>
+  <li><strong>Station Management</strong>: Association, authentication, key exchange</li>
+  <li><strong>Data Control</strong>: TX/RX parameters, AMPDU settings</li>
+  <li><strong>Debug/Statistics</strong>: Performance monitoring, diagnostics</li>
+</ul>
+
+<h3 id="3-hardware-interface-hif-layer">3. Hardware Interface (HIF) Layer</h3>
+
+<p><strong>Files</strong>: <code class="language-plaintext highlighter-rouge">hif.c/h</code>, <code class="language-plaintext highlighter-rouge">nrc-hif-*.c</code></p>
+
+<p>The HIF layer abstracts hardware communication:</p>
+
+<div class="language-c highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">struct</span> <span class="n">hif</span> <span class="p">{</span>
+    <span class="n">u8</span> <span class="n">type</span><span class="p">;</span>        <span class="c1">// HIF_TYPE_FRAME, HIF_TYPE_WIM</span>
+    <span class="n">u8</span> <span class="n">subtype</span><span class="p">;</span>     <span class="c1">// Frame subtype</span>
+    <span class="n">u16</span> <span class="n">len</span><span class="p">;</span>        <span class="c1">// Payload length</span>
+    <span class="n">s8</span> <span class="n">vifindex</span><span class="p">;</span>    <span class="c1">// Virtual interface index</span>
+<span class="p">}</span> <span class="n">__packed</span><span class="p">;</span>
+</code></pre></div></div>
+
+<p><strong>Supported Interfaces:</strong></p>
+<ul>
+  <li><strong>CSPI (Custom SPI)</strong>: Primary interface for NRC7292</li>
+  <li><strong>UART</strong>: Alternative serial interface</li>
+  <li><strong>USB</strong>: Development and testing interface</li>
+</ul>
+
+<h3 id="4-txrx-processing-engine">4. TX/RX Processing Engine</h3>
+
+<p><strong>Files</strong>: <code class="language-plaintext highlighter-rouge">nrc-trx.c/h</code></p>
+
+<p>Handles packet transmission and reception with advanced features:</p>
+
+<h4 id="tx-path-features">TX Path Features:</h4>
+<ul>
+  <li><strong>Credit-based flow control</strong>: Hardware buffer management</li>
+  <li><strong>TX tasklet processing</strong>: Bottom-half sequential transmission</li>
+  <li><strong>AMPDU Block ACK</strong>: Automatic aggregation management</li>
+  <li><strong>Handler chain</strong>: Modular processing pipeline</li>
+</ul>
+
+<h4 id="rx-path-features">RX Path Features:</h4>
+<ul>
+  <li><strong>Multi-threaded processing</strong>: Workqueue-based RX handling</li>
+  <li><strong>Frame filtering</strong>: Protocol-specific filtering</li>
+  <li><strong>Statistics collection</strong>: Performance monitoring</li>
+</ul>
+
+<h3 id="5-power-management">5. Power Management</h3>
+
+<p><strong>Files</strong>: <code class="language-plaintext highlighter-rouge">nrc-pm.c/h</code></p>
+
+<p>Comprehensive power management for IoT applications:</p>
+
+<div class="language-c highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">enum</span> <span class="n">NRC_PS_MODE</span> <span class="p">{</span>
+    <span class="n">NRC_PS_NONE</span><span class="p">,</span>               <span class="c1">// No power save</span>
+    <span class="n">NRC_PS_MODEMSLEEP</span><span class="p">,</span>         <span class="c1">// Modem sleep mode</span>
+    <span class="n">NRC_PS_DEEPSLEEP_TIM</span><span class="p">,</span>      <span class="c1">// Deep sleep with TIM</span>
+    <span class="n">NRC_PS_DEEPSLEEP_NONTIM</span>    <span class="c1">// Deep sleep without TIM</span>
+<span class="p">};</span>
+</code></pre></div></div>
+
+<p><strong>Power Save Features:</strong></p>
+<ul>
+  <li><strong>Dynamic power scaling</strong>: Adaptive power based on traffic</li>
+  <li><strong>BSS max idle</strong>: Keep-alive mechanism for AP mode</li>
+  <li><strong>Target wake time</strong>: Scheduled wake-up coordination</li>
+  <li><strong>Listen interval</strong>: STA sleep scheduling</li>
+</ul>
+
+<h2 id="data-flow-architecture">Data Flow Architecture</h2>
+
+<h3 id="tx-data-flow">TX Data Flow</h3>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>mac80211 → nrc_mac_tx() → TX handlers → Credit check → 
+WIM encapsulation → HIF framing → CSPI transmission → Firmware
+</code></pre></div></div>
+
+<h3 id="rx-data-flow">RX Data Flow</h3>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>Firmware → CSPI reception → HIF parsing → WIM processing → 
+RX handlers → Frame validation → mac80211 indication
+</code></pre></div></div>
+
+<h2 id="memory-management">Memory Management</h2>
+
+<h3 id="skb-socket-buffer-processing">SKB (Socket Buffer) Processing</h3>
+
+<p>The driver uses Linux SKB structures for efficient packet handling:</p>
+
+<div class="language-c highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c1">// TX: Add headers using headroom</span>
+<span class="n">hif</span> <span class="o">=</span> <span class="p">(</span><span class="kt">void</span> <span class="o">*</span><span class="p">)</span><span class="n">skb_push</span><span class="p">(</span><span class="n">skb</span><span class="p">,</span> <span class="k">sizeof</span><span class="p">(</span><span class="k">struct</span> <span class="n">hif</span><span class="p">));</span>
+<span class="n">wim</span> <span class="o">=</span> <span class="p">(</span><span class="kt">void</span> <span class="o">*</span><span class="p">)</span><span class="n">skb_push</span><span class="p">(</span><span class="n">skb</span><span class="p">,</span> <span class="k">sizeof</span><span class="p">(</span><span class="k">struct</span> <span class="n">wim</span><span class="p">));</span>
+
+<span class="c1">// RX: Remove headers</span>
+<span class="n">skb_pull</span><span class="p">(</span><span class="n">skb</span><span class="p">,</span> <span class="k">sizeof</span><span class="p">(</span><span class="k">struct</span> <span class="n">hif</span><span class="p">));</span>
+<span class="n">skb_pull</span><span class="p">(</span><span class="n">skb</span><span class="p">,</span> <span class="k">sizeof</span><span class="p">(</span><span class="k">struct</span> <span class="n">wim</span><span class="p">));</span>
+</code></pre></div></div>
+
+<h3 id="driver-private-structures">Driver Private Structures</h3>
+
+<p>Each mac80211 structure has associated driver-private data:</p>
+
+<div class="language-c highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="cp">#define to_i_vif(v)  ((struct nrc_vif *) (v)-&gt;drv_priv)
+#define to_i_sta(s)  ((struct nrc_sta *) (s)-&gt;drv_priv)
+</span></code></pre></div></div>
+
+<h2 id="hardware-abstraction">Hardware Abstraction</h2>
+
+<h3 id="cspi-custom-spi-protocol">CSPI (Custom SPI) Protocol</h3>
+
+<div class="language-c highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="cm">/*
+ * CSPI Command Format:
+ * [31:24]: Start byte (0x50)
+ * [23:23]: Burst mode
+ * [22:22]: Direction (read/write)
+ * [21:21]: Address mode (fixed/incremental)
+ * [20:13]: Register address
+ * [12:0]:  Transfer length
+ */</span>
+<span class="cp">#define C_SPI_WRITE     0x50400000
+#define C_SPI_READ      0x50000000
+#define C_SPI_BURST     0x00800000
+</span></code></pre></div></div>
+
+<h3 id="interrupt-handling">Interrupt Handling</h3>
+
+<div class="language-c highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c1">// GPIO-based interrupt for CSPI</span>
+<span class="k">static</span> <span class="n">irqreturn_t</span> <span class="nf">nrc_hif_isr</span><span class="p">(</span><span class="kt">int</span> <span class="n">irq</span><span class="p">,</span> <span class="kt">void</span> <span class="o">*</span><span class="n">dev_id</span><span class="p">)</span>
+<span class="p">{</span>
+    <span class="k">struct</span> <span class="n">nrc_hif_device</span> <span class="o">*</span><span class="n">hdev</span> <span class="o">=</span> <span class="n">dev_id</span><span class="p">;</span>
+    
+    <span class="c1">// Disable interrupt</span>
+    <span class="n">disable_irq_nosync</span><span class="p">(</span><span class="n">hdev</span><span class="o">-&gt;</span><span class="n">irq</span><span class="p">);</span>
+    
+    <span class="c1">// Schedule bottom-half processing</span>
+    <span class="n">schedule_work</span><span class="p">(</span><span class="o">&amp;</span><span class="n">hdev</span><span class="o">-&gt;</span><span class="n">work</span><span class="p">);</span>
+    
+    <span class="k">return</span> <span class="n">IRQ_HANDLED</span><span class="p">;</span>
+<span class="p">}</span>
+</code></pre></div></div>
+
+<h2 id="supported-network-modes">Supported Network Modes</h2>
+
+<h3 id="1-station-sta-mode">1. Station (STA) Mode</h3>
+<ul>
+  <li><strong>Infrastructure connectivity</strong>: Connect to existing APs</li>
+  <li><strong>Power management</strong>: Advanced sleep scheduling</li>
+  <li><strong>Roaming support</strong>: Seamless AP transitions</li>
+</ul>
+
+<h3 id="2-access-point-ap-mode">2. Access Point (AP) Mode</h3>
+<ul>
+  <li><strong>Client support</strong>: Up to 8192 associated clients</li>
+  <li><strong>Security</strong>: WPA2/WPA3 with hardware acceleration</li>
+  <li><strong>QoS management</strong>: 4-AC traffic prioritization</li>
+</ul>
+
+<h3 id="3-mesh-networking">3. Mesh Networking</h3>
+<ul>
+  <li><strong>IEEE 802.11s compliance</strong>: Standard mesh protocols</li>
+  <li><strong>HWMP routing</strong>: Hybrid wireless mesh protocol</li>
+  <li><strong>Self-healing</strong>: Automatic path recovery</li>
+</ul>
+
+<h3 id="4-monitor-mode">4. Monitor Mode</h3>
+<ul>
+  <li><strong>Packet capture</strong>: All frame types</li>
+  <li><strong>Radiotap headers</strong>: Detailed RF information</li>
+  <li><strong>Real-time analysis</strong>: Low-latency monitoring</li>
+</ul>
+
+<h2 id="ieee-80211ah-specific-features">IEEE 802.11ah Specific Features</h2>
+
+<h3 id="s1g-sub-1ghz-support">S1G (Sub-1GHz) Support</h3>
+
+<div class="language-c highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c1">// S1G channel configuration</span>
+<span class="k">struct</span> <span class="n">s1g_channel_info</span> <span class="p">{</span>
+    <span class="n">u16</span> <span class="n">center_freq</span><span class="p">;</span>     <span class="c1">// Center frequency in MHz</span>
+    <span class="n">u8</span> <span class="n">bandwidth</span><span class="p">;</span>        <span class="c1">// 1, 2, 4, 8, 16 MHz</span>
+    <span class="n">u8</span> <span class="n">primary_channel</span><span class="p">;</span>  <span class="c1">// Primary channel number</span>
+    <span class="n">u8</span> <span class="n">channel_width</span><span class="p">;</span>    <span class="c1">// Channel width index</span>
+<span class="p">};</span>
+</code></pre></div></div>
+
+<h3 id="extended-range-features">Extended Range Features</h3>
+<ul>
+  <li><strong>1km+ communication range</strong>: 10x improvement over 2.4GHz</li>
+  <li><strong>Building penetration</strong>: Enhanced signal propagation</li>
+  <li><strong>Interference resistance</strong>: Sub-1GHz band advantages</li>
+</ul>
+
+<h3 id="iot-optimizations">IoT Optimizations</h3>
+<ul>
+  <li><strong>Massive device support</strong>: 8192 devices per AP</li>
+  <li><strong>Ultra-low power</strong>: Years of battery operation</li>
+  <li><strong>Small data efficiency</strong>: Optimized for sensor data</li>
+</ul>
+
+<h2 id="configuration-and-management">Configuration and Management</h2>
+
+<h3 id="module-parameters">Module Parameters</h3>
+
+<div class="language-c highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c1">// Key module parameters</span>
+<span class="n">module_param</span><span class="p">(</span><span class="n">fw_name</span><span class="p">,</span> <span class="n">charp</span><span class="p">,</span> <span class="mo">0444</span><span class="p">);</span>           <span class="c1">// Firmware file</span>
+<span class="n">module_param</span><span class="p">(</span><span class="n">bd_name</span><span class="p">,</span> <span class="n">charp</span><span class="p">,</span> <span class="mo">0600</span><span class="p">);</span>           <span class="c1">// Board data file  </span>
+<span class="n">module_param</span><span class="p">(</span><span class="n">hifspeed</span><span class="p">,</span> <span class="kt">int</span><span class="p">,</span> <span class="mo">0600</span><span class="p">);</span>            <span class="c1">// Interface speed</span>
+<span class="n">module_param</span><span class="p">(</span><span class="n">spi_gpio_irq</span><span class="p">,</span> <span class="kt">int</span><span class="p">,</span> <span class="mo">0600</span><span class="p">);</span>        <span class="c1">// GPIO interrupt pin</span>
+<span class="n">module_param</span><span class="p">(</span><span class="n">power_save</span><span class="p">,</span> <span class="kt">int</span><span class="p">,</span> <span class="mo">0600</span><span class="p">);</span>          <span class="c1">// Power save mode</span>
+</code></pre></div></div>
+
+<h3 id="netlink-interface">Netlink Interface</h3>
+
+<p><strong>File</strong>: <code class="language-plaintext highlighter-rouge">nrc-netlink.c/h</code></p>
+
+<p>Provides userspace control interface:</p>
+
+<div class="language-c highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c1">// Netlink command types</span>
+<span class="k">enum</span> <span class="n">NRC_NL_COMMANDS</span> <span class="p">{</span>
+    <span class="n">NRC_NL_CMD_SET_CONFIG</span><span class="p">,</span>
+    <span class="n">NRC_NL_CMD_GET_STATUS</span><span class="p">,</span>
+    <span class="n">NRC_NL_CMD_TRIGGER_SCAN</span><span class="p">,</span>
+    <span class="n">NRC_NL_CMD_SET_AMPDU</span><span class="p">,</span>
+    <span class="c1">// ... additional commands</span>
+<span class="p">};</span>
+</code></pre></div></div>
+
+<h2 id="testing-and-validation">Testing and Validation</h2>
+
+<h3 id="test-framework-structure">Test Framework Structure</h3>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>test/
+├── block_ack/          # AMPDU and BA testing
+├── netlink/            # Netlink interface tests  
+├── vendor/             # Vendor-specific tests
+├── insmod_rmmod_test.py    # Module lifecycle testing
+└── channel_sweep_test.py   # Channel performance testing
+</code></pre></div></div>
+
+<h3 id="comprehensive-testing-coverage">Comprehensive Testing Coverage</h3>
+<ul>
+  <li><strong>Protocol compliance</strong>: IEEE 802.11ah standard verification</li>
+  <li><strong>Performance testing</strong>: Throughput, latency, range testing</li>
+  <li><strong>Stress testing</strong>: Long-duration stability validation</li>
+  <li><strong>Interoperability</strong>: Multi-vendor device testing</li>
+</ul>
+
+<h2 id="conclusion">Conclusion</h2>
+
+<p>The NRC7292 driver architecture demonstrates a well-designed, layered approach optimized for IEEE 802.11ah HaLow applications. Key architectural strengths include:</p>
+
+<ol>
+  <li><strong>Clean Layer Separation</strong>: Clear interfaces between components</li>
+  <li><strong>mac80211 Integration</strong>: Full compliance with Linux wireless framework</li>
+  <li><strong>Efficient Data Flow</strong>: Zero-copy optimization and hardware acceleration</li>
+  <li><strong>Comprehensive Power Management</strong>: IoT-focused energy efficiency</li>
+  <li><strong>Extensive Testing</strong>: Production-quality validation framework</li>
+</ol>
+
+<p>This architecture effectively bridges the gap between Linux networking stack and specialized HaLow hardware, providing a robust foundation for IoT deployment scenarios requiring long-range, low-power wireless connectivity.</p>
+
+<hr />
+
+<p><em>For detailed component analysis and source code insights, explore the complete <a href="https://github.com/oyongjoo/nrc7292-analysis">NRC7292 analysis documentation</a>.</em></p>
+
+    </div>
+    <footer>
+        <div class="post-navigation">
+            
+            
+                <a href="/2025/06/17/nrc7292-mesh-networking/" class="next">NRC7292 HaLow Mesh Networking Implementation →</a>
+            
+        </div>
+    </footer>
+</article>
+    </main>
+    <footer>
+        <p>&copy; 2025 NRC7292 Analysis Blog - Code Analysis by Liam Lee</p>
+    </footer>
+</body>
+</html>
