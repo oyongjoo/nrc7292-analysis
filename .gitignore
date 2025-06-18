@@ -1,4 +1,5 @@
-nrc7292_sw_pkg/
+# Temporary exclusion - allowing nrc7292_sw_pkg for testing
+# nrc7292_sw_pkg/
 _site/
 .sass-cache/
 .jekyll-cache/

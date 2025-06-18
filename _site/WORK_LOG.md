@@ -297,6 +297,52 @@ switch (i_sta->tx_ba_session[tid]) {
 - 카테고리별 포스트 분류 (Architecture, Networking, Protocol 등)
 - 태그 시스템으로 주제별 검색
 - 소스 코드 구문 강조 표시
+
+**4. GitHub Pages 배포**
+- Repository: https://github.com/oyongjoo/nrc7292-analysis
+- 블로그 URL: https://oyongjoo.github.io/nrc7292-analysis/
+- 자동 Jekyll 빌드 및 배포 설정 완료
+
+### Session 3: Blog Hosting and Credit System Deep Dive
+
+#### Context Continuation
+**Background**: GitHub Pages 블로그 배포 후 새로운 세션이 시작됨. 사용자가 blog posting에 대한 확인과 함께 Credit system에 대한 심화 질문 시작.
+
+#### Q1: Blog Content Verification
+**Question**: GitHub Pages 블로그가 정상적으로 배포되었는지 확인하고, 현재 세션의 Credit 시스템 분석 내용이 실시간으로 work_log.md에 업데이트되는지 질문
+**Answer**: GitHub Pages 블로그는 https://oyongjoo.github.io/nrc7292-analysis/ 에서 정상 접속 가능하며, Jekyll 기반으로 4개의 주요 포스트가 게시되어 있습니다. 현재 세션의 대화 내용은 실시간으로 work_log.md에 업데이트되지 않으므로 수동으로 추가가 필요합니다.
+
+#### Q2: HIF Work Queue Priority Processing
+**Question**: `for (i = ARRAY_SIZE(hdev->queue)-1; i >= 0; i--)` 에서 i 값을 큰 값부터 넣는 이유는?
+**Answer**: QoS 우선순위 보장을 위한 것입니다. `hdev->queue` 배열은 크기가 2이며, queue[1]은 WIM Queue(제어 명령, 높은 우선순위), queue[0]은 Frame Queue(데이터 프레임, 낮은 우선순위)입니다. 큰 인덱스부터 처리하여 중요한 제어 명령이 데이터보다 먼저 전송되도록 보장합니다.
+
+#### Q3: Credit System Statistics Understanding
+**Question**: AC1의 35(credit)와 5(pending)의 의미에 대한 상세 설명 요청. pending이 tx credit이 부족해서 대기 중인 것인지, 아니면 credit이 35개나 남아있는데 왜 5개가 대기하는지에 대한 혼란
+**Answer**: Credit 35개는 펌웨어 버퍼에 충분한 여유 공간이 있음을 의미하고, Pending 5개는 드라이버 레벨에서 일시적으로 대기 중인 상태입니다. 이는 QoS 우선순위 보장(round-robin), Power Management 상태 전환, HIF Layer 병목, 또는 Batch Processing 최적화 등의 이유로 발생할 수 있습니다. Credit이 있어도 시스템 상태나 우선순위에 따라 패킷이 대기할 수 있는 정상적인 동작입니다.
+
+#### Q4: Credit Flow Control Mechanism
+**Question**: Credit을 통한 flow control이 원론적으로는 host→fw로 1개 데이터를 보내고, rx event로 wim credit report를 확인하여 credit을 복구하는 1:1 동기 방식인지 질문
+**Answer**: 아닙니다. Credit 시스템은 비동기 배치 방식입니다. 여러 패킷을 연속으로 전송 가능하며(credit 즉시 차감), WIM Credit Report는 배치로 복구됩니다. 예: AC1 Credit 40개에서 6개 패킷 연속 전송(각 6 credit) → Credit: 40→34→28→22→16→10→4 → 나중에 펌웨어에서 배치로 Credit Report 전송하여 복구.
+
+#### Q5: Atomic Operations in Credit Management
+**Question**: `atomic_read`, `atomic_sub`, `atomic_set`의 역할과 race condition 방지 메커니즘에 대한 상세 설명 요청
+**Answer**: 
+- **atomic_read()**: Thread-safe하게 현재 credit 값 확인, 다른 스레드의 수정 중에도 안전한 읽기
+- **atomic_sub()**: 원자적 credit 차감으로 경쟁 상태 방지, 두 패킷이 동시에 마지막 credit 사용하려는 상황 방지
+- **atomic_add()**: Pending 증가를 통한 전송 중인 패킷 credit 추적
+- **atomic_set()**: 펌웨어 보고 값으로 절대값 설정, 드라이버-펌웨어 간 동기화
+
+그러나 `read`와 `sub` 사이의 간격에서는 여전히 race condition 발생 가능하며, NRC7292는 TX tasklet과 spinlock으로 이를 해결합니다.
+
+#### Q6: Source Code Recovery Request
+**Question**: nrc7292_sw_pkg가 삭제되어 Credit 시스템 분석이 어려우니 소스코드 복구 요청 및 현재 대화 내용의 work_log.md 실시간 업데이트 확인
+**Answer**: nrc7292_sw_pkg 디렉토리가 비어있어 복구가 필요하며, 현재 대화 내용은 실시간으로 work_log.md에 업데이트되지 않고 있어 수동 추가가 필요합니다. 소스코드 다운로드 위치나 백업 정보가 필요합니다.
+
+#### Current Status
+- **nrc7292_sw_pkg**: 복구 필요 (원본 소스 위치 정보 대기)
+- **WORK_LOG.md**: 현재 세션의 Credit 시스템 분석 내용 추가 완료
+- **Blog**: https://oyongjoo.github.io/nrc7292-analysis/ 정상 운영 중
+- **Analysis Focus**: Credit-based flow control 시스템의 atomic operations와 race condition 방지 메커니즘
 - 반응형 디자인 (모바일 지원)
 - GitHub 저장소 연동
 
