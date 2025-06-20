@@ -24,3 +24,12 @@ kramdown:
   syntax_highlighter: rouge
   syntax_highlighter_opts:
     css_class: 'highlight'
+
+# Exclude large source code directories from Jekyll build
+exclude:
+  - code_analysis/nrc7292_source/
+  - nrc7292_sw_pkg/
+  - .git/
+  - README.md
+  - Gemfile
+  - Gemfile.lock

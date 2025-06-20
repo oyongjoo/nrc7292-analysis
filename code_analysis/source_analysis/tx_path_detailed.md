@@ -222,9 +222,132 @@ if (power_save == NRC_PS_MODEMSLEEP) {
 }
 ```
 
-## 3. TX Handler Chain Analysis
+## 3. TXQ (Transmit Queue) Mechanism Analysis
 
-### 3.1 Handler Chain Structure
+### 3.1 TXQ Overview and Activation Conditions
+
+The NRC7292 driver supports the **modern TXQ architecture** introduced in Linux kernel 4.1.0+:
+
+```c
+// nrc-build-config.h:128
+#if KERNEL_VERSION(4, 1, 0) <= NRC_TARGET_KERNEL_VERSION
+#define CONFIG_USE_TXQ
+#endif
+```
+
+### 3.2 TXQ Data Structure
+
+#### `struct nrc_txq` (nrc.h:160-167)
+```c
+struct nrc_txq {
+    u16 hw_queue;              // 0: AC_BK, 1: AC_BE, 2: AC_VI, 3: AC_VO
+    struct list_head list;     // Active TXQ linked list
+    unsigned long nr_fw_queueud;     // Number of packets queued in firmware
+    unsigned long nr_push_allowed;   // Number of packets allowed for transmission
+    struct ieee80211_vif vif;        // Associated VIF
+    struct ieee80211_sta *sta;       // Associated STA
+};
+```
+
+### 3.3 TXQ Core Functions
+
+#### `nrc_wake_tx_queue()` (nrc-mac80211.c:524)
+```c
+void nrc_wake_tx_queue(struct ieee80211_hw *hw, struct ieee80211_txq *txq)
+{
+    struct nrc *nw = hw->priv;
+    struct nrc_txq *ntxq = (void *)txq->drv_priv;
+
+    // 1. Wake target in power save mode
+    if (nw->drv_state == NRC_DRV_PS) {
+        nrc_hif_wake_target(nw->hif);
+    }
+
+    spin_lock_bh(&nw->txq_lock);
+    
+    // 2. Prevent duplicate registration: only add empty TXQ to active list
+    if (list_empty(&ntxq->list)) {
+        list_add_tail(&ntxq->list, &nw->txq);
+    }
+    
+    spin_unlock_bh(&nw->txq_lock);
+
+    // 3. Schedule TX tasklet
+    nrc_kick_txq(nw);
+}
+```
+
+**`list_empty()` Check Logic**:
+- **True**: TXQ is not yet in the active list → Add to list
+- **False**: TXQ is already in the active list → Prevent duplicate registration
+- **Purpose**: Prevent the same TXQ from being queued multiple times for performance optimization
+
+#### `nrc_kick_txq()` (nrc-mac80211.c:581)
+```c
+void nrc_kick_txq(struct nrc *nw)
+{
+    if (nw->drv_state != NRC_DRV_RUNNING)
+        return;
+
+    tasklet_schedule(&nw->tx_tasklet);  // Activate TX tasklet
+}
+```
+
+#### `nrc_tx_tasklet()` (nrc-mac80211.c:545)
+TX tasklet iterates through active TXQ list and processes packets:
+
+```c
+void nrc_tx_tasklet(struct tasklet_struct *t)
+{
+    struct nrc *nw = from_tasklet(nw, t, tx_tasklet);
+    struct nrc_txq *cur, *next;
+    struct ieee80211_txq *txq;
+    struct sk_buff *skb;
+
+    spin_lock_bh(&nw->txq_lock);
+    list_for_each_entry_safe(cur, next, &nw->txq, list) {
+        txq = to_txq(cur);
+        
+        // Extract and transmit packets from TXQ
+        while ((skb = ieee80211_tx_dequeue(nw->hw, txq)) != NULL) {
+            // Send packet through normal TX path
+            nrc_mac_tx(nw->hw, NULL, skb);
+        }
+        
+        // Remove processed TXQ from active list
+        list_del_init(&cur->list);
+    }
+    spin_unlock_bh(&nw->txq_lock);
+}
+```
+
+### 3.4 TXQ vs Legacy TX Method Comparison
+
+| Aspect | Legacy Method | TXQ Method |
+|--------|---------------|------------|
+| **Queue Management** | Driver manages directly | mac80211 central management |
+| **Memory Efficiency** | Driver-specific implementation | Unified memory pool |
+| **QoS Support** | Manual AC mapping | Automatic per-STA, per-TID queues |
+| **Flow Control** | Credit system only | Credit + TXQ backpressure |
+| **Power Management** | Manual queue cleanup | Automatic DEEPSLEEP integration |
+
+### 3.5 TXQ Lifecycle Management
+
+#### Initialization
+```c
+// In nrc_register_hw()
+hw->txq_data_size = sizeof(struct nrc_txq);
+```
+
+#### Cleanup Points
+- **VIF removal**: `nrc_cleanup_txq(nw, vif->txq)`
+- **STA deassociation**: Cleanup all per-STA TXQs
+- **Power save**: `nrc_cleanup_txq_all(nw)`
+- **Driver shutdown**: `nrc_unregister_hw()`
+
+## 4. TX Handler Chain Analysis
+
+### 4.1 Handler Chain Structure
 
 TX handlers are arranged in order at compile time through the linker script (`nrc.lds`):
 
@@ -236,7 +359,7 @@ TX handlers are arranged in order at compile time through the linker script (`nr
 }
 ```
 
-### 3.2 Handler Macro Definition (`nrc.h`, lines 432-438)
+### 4.2 Handler Macro Definition (`nrc.h`, lines 432-438)
 ```c
 #define TXH(fn, mask)                   \
     static struct nrc_trx_handler __txh_ ## fn \

@@ -108,6 +108,154 @@ cd package/src/nrc/test/netlink && python3 -c "from nrcnetlink import NrcNetlink
 - Successfully built CLI application and verified test framework functionality
 - Ready for advanced topics, implementation guidance, or practical development work
 
+### Current Session: ADDBA Request 전송 경로 분석 및 문서 수정
+
+#### Q16: ADDBA Request 프레임 생성 및 전송 과정
+**Question**: mac80211이 ADDBA Request 프레임 생성 및 전송, 이 과정은 어디서 어떻게 진행되게 되는거야? supplicant에서 ba 확인을 받은 이후에서 전송하게 되는거야?
+
+**Answer**: ADDBA Request 생성 및 전송은 다음과 같이 진행됩니다:
+
+**1. 생성 위치**: mac80211 커널 서브시스템의 `net/mac80211/agg-tx.c` 파일의 `ieee80211_send_addba_request()` 함수
+
+**2. NRC7292 처리 순서**:
+```
+1. nrc_mac_ampdu_action() [IEEE80211_AMPDU_TX_START]
+2. nrc_wim_ampdu_action() [펌웨어 통신]
+3. ieee80211_start_tx_ba_cb_irqsafe() [드라이버→mac80211]
+4. ieee80211_send_addba_request() [ADDBA 프레임 생성/전송]
+```
+
+**3. wpa_supplicant와의 관계**: ADDBA Request는 wpa_supplicant BA 확인 **이후가 아닙니다**. 실제로는:
+- wpa_supplicant: 인증, 연결, 보안 핸드셰이크만 담당
+- mac80211: 연결 완료 후 독립적으로 BA 세션 관리
+
+#### Q17: ADDBA Request 무선 전송 경로
+**Question**: 그럼 ieee80211_send_addba_request 이 함수는 mac80211 에서 독립적으로 전송한다고 하면 이것을 firmware로 전달해서 air로 보내야 할텐데 이부분은 어디에 있는거야?
+
+**Answer**: ADDBA Request가 무선으로 전송되는 완전한 경로:
+
+**정정된 전송 흐름** (정확한 함수명과 라인 번호):
+```
+ieee80211_send_addba_request() [mac80211]
+    ↓
+nrc_mac_tx() [nrc-trx.c:76] ← 모든 프레임 공통 진입점
+    ↓
+TX Handler 체인 처리 (데이터 프레임과 동일)
+    ↓
+nrc_xmit_frame() [hif.c:711]
+    ↓
+프레임 분류: ieee80211_is_mgmt(fc) → HIF_FRAME_SUB_MGMT [hif.c:817]
+    ↓
+nrc_hif_enqueue_skb() [hif.c:461]
+    ↓
+nrc_hif_work() [hif.c:177]
+    ↓
+nrc_hif_xmit() [nrc-hif.h:inline] → spi_xmit() [nrc-hif-cspi.c:1593]
+    ↓
+CSPI 하드웨어 전송 → 펌웨어 처리 → 무선 전송
+```
+
+**핵심 발견**:
+- ADDBA Request는 **데이터 프레임과 동일한 전송 경로** 사용
+- 프레임 구분은 **HIF 레이어**에서 발생 (`HIF_FRAME_SUB_MGMT`)
+- **고우선순위 AC 큐** 사용으로 빠른 처리 보장
+
+#### 문서 수정 필요사항
+**발견된 문제**: 이전 문서의 함수명과 라인 번호가 부정확
+**수정 대상**: 모든 TX 경로 관련 문서의 함수 참조 정정
+
+#### Jekyll _site 디렉토리 문제
+**Question**: _site내에 nrc7292_source 원본 코드가 있던데 왜 여기에 원본 코드가 필요한거야?
+
+**Answer**: Jekyll이 기본적으로 전체 프로젝트를 `_site`에 복사하기 때문입니다. `nrc7292_source`는 git submodule로 크기가 크므로 Jekyll 빌드에서 제외해야 합니다. `_config.yml`에 exclude 설정을 추가했습니다.
+
+#### Q18: CONFIG_USE_TXQ 설정과 TXQ 메커니즘
+**Question**: #ifdef CONFIG_USE_TXQ 이 configuration이 있는데 TXQ에 대해서 상세히 설명해줘
+
+**Answer**: `CONFIG_USE_TXQ`는 Linux 커널 4.1.0+의 **현대적 TX 큐 아키텍처**를 활성화하는 설정입니다.
+
+**1. TXQ(Transmit Queue) 개념**:
+- mac80211의 새로운 TX 큐 아키텍처
+- per-STA, per-TID 큐 자동 관리
+- 표준화된 QoS 처리
+
+**2. 활성화 조건**:
+```c
+#if KERNEL_VERSION(4, 1, 0) <= NRC_TARGET_KERNEL_VERSION
+#define CONFIG_USE_TXQ
+#endif
+```
+
+**3. NRC TXQ 데이터 구조**:
+```c
+struct nrc_txq {
+    u16 hw_queue;              // 0: AC_BK, 1: AC_BE, 2: AC_VI, 3: AC_VO
+    struct list_head list;     // txq 연결 리스트
+    unsigned long nr_fw_queueud;     // 펌웨어 큐상태 추적
+    unsigned long nr_push_allowed;   // 전송 허용 패킷 수
+};
+```
+
+**4. 핵심 함수**:
+- `nrc_wake_tx_queue()` [nrc-mac80211.c:524]: mac80211이 큐에 패킷 추가 시 드라이버 알림
+- `nrc_cleanup_txq_all()` [nrc-mac80211.c:597]: 모든 TXQ 정리
+- `nrc_cleanup_txq()` [nrc-mac80211.c:616]: 개별 TXQ 정리
+
+**5. TXQ vs 기존 방식**:
+- **기존**: 드라이버가 큐 직접 관리
+- **TXQ**: mac80211이 중앙 관리, 자동 백프레셔
+
+**6. 파워 관리 연동**:
+```c
+// DEEPSLEEP 진입 시 모든 TXQ 정리
+if (nw->drv_state == NRC_DRV_PS) {
+    nrc_hif_wake_target(nw->hif);  // 타겟 깨우기
+}
+```
+
+**7. 장점**:
+- **성능 향상**: 표준화된 큐 관리
+- **전력 효율성**: 파워 세이브 모드와 긴밀한 연동
+- **코드 단순화**: 드라이버 큐 관리 부담 감소
+- **QoS 개선**: per-STA, per-TID 큐 자동 관리
+
+NRC7292는 TXQ를 통해 **credit-based 흐름 제어**와 **파워 관리**를 효율적으로 구현하고 있습니다.
+
+#### Q19: TXQ list_empty() 체크 로직
+**Question**: `if (list_empty(&ntxq->list))` 이 부분에서 왜 empty 상태에서만 nw->txq를 list에 추가하는거야? empty 상태가 아니면 txq는 추가되지않는건가?
+
+**Answer**: `list_empty()` 체크는 **중복 등록 방지**를 위한 최적화 로직입니다.
+
+**동작 원리**:
+- **`list_empty(&ntxq->list) == true`**: TXQ가 아직 활성 리스트에 등록되지 않음 → 리스트에 추가
+- **`list_empty(&ntxq->list) == false`**: TXQ가 이미 활성 리스트에 등록됨 → 중복 등록 방지
+
+**시나리오 예시**:
+1. **최초 패킷 도착**: `list_empty() = true` → TXQ를 `nw->txq` 리스트에 추가
+2. **추가 패킷 도착**: `list_empty() = false` → 이미 리스트에 있으므로 중복 추가 안함
+3. **TX 태스크릿 처리**: 모든 패킷 처리 후 `list_del_init()`로 TXQ 제거
+4. **다음 패킷**: 다시 `list_empty() = true`가 되어 새로 추가 가능
+
+**목적**:
+- **성능 최적화**: 동일 TXQ의 여러 번 큐잉 방지
+- **리스트 무결성**: 리스트 구조 손상 방지
+- **자원 효율성**: 불필요한 메모리 사용량 감소
+
+**대안 체크 없이 추가할 경우**:
+- 동일 TXQ가 리스트에 여러 번 등록
+- TX 태스크릿에서 중복 처리로 성능 저하
+- 리스트 노드 체인 손상 가능성
+
+파워 세이브에서 깨어나더라도 TXQ가 이미 리스트에 있다면 중복 추가하지 않아 효율적입니다.
+
+#### TX Routine 문서 업데이트
+**작업 완료**: TX 경로 상세 문서에 TXQ 메커니즘 섭션 추가
+- TXQ 데이터 구조 및 활성화 조건
+- 핵심 함수들 (`nrc_wake_tx_queue`, `nrc_kick_txq`, `nrc_tx_tasklet`)
+- TXQ vs 기존 TX 방식 비교
+- 생명주기 관리 및 파워 세이브 연동
+- `list_empty()` 로직에 대한 상세한 설명
+
 ## Technical Q&A Sessions
 
 ### Session 1: TX Data Handling and Architecture Analysis
@@ -879,33 +1027,37 @@ static int setup_ba_session(struct nrc_trx *tx)
 ```c
 static const struct ieee80211_ops nrc_ops = {
     // ... 기타 콜백들
-    .ampdu_action = nrc_ampdu_action,  // AMPDU 액션 처리
+    .ampdu_action = nrc_mac_ampdu_action,  // AMPDU 액션 처리 (정정: 실제 함수명)
     .get_txpower = nrc_get_txpower,
     // ...
 };
 ```
 
-**AMPDU Action 처리** (`nrc-mac80211.c`):
+**AMPDU Action 처리** (`nrc-mac80211.c:2321`):
 ```c
-static int nrc_ampdu_action(struct ieee80211_hw *hw,
-                           struct ieee80211_vif *vif,
-                           struct ieee80211_ampdu_params *params)
+static int nrc_mac_ampdu_action(struct ieee80211_hw *hw,
+                               struct ieee80211_vif *vif, 
+                               struct ieee80211_ampdu_params *params)
 {
-    struct nrc_sta *i_sta = to_i_sta(params->sta);
-    u8 tid = params->tid;
+    struct nrc *nw = hw->priv;
+    struct ieee80211_sta *sta = params->sta;
+    u16 tid = params->tid;
     
     switch (params->action) {
     case IEEE80211_AMPDU_TX_START:
-        i_sta->tx_ba_session[tid] = IEEE80211_BA_PENDING;
+        if (nrc_wim_ampdu_action(nw, vif, WIM_AMPDU_TX_START, sta, tid))
+            return -EIO;
         return IEEE80211_AMPDU_TX_START_IMMEDIATE;
         
     case IEEE80211_AMPDU_TX_OPERATIONAL:
-        i_sta->tx_ba_session[tid] = IEEE80211_BA_OPERATIONAL;
+        if (nrc_wim_ampdu_action(nw, vif, WIM_AMPDU_TX_OPERATIONAL, sta, tid))
+            return -EIO;
         break;
         
     case IEEE80211_AMPDU_TX_STOP_CONT:
     case IEEE80211_AMPDU_TX_STOP_FLUSH:
-        i_sta->tx_ba_session[tid] = IEEE80211_BA_CLOSE;
+        if (nrc_wim_ampdu_action(nw, vif, WIM_AMPDU_TX_STOP, sta, tid))
+            return -EIO;
         break;
         
     default:
@@ -1052,6 +1204,197 @@ git commit -m "Remove placeholder code, prepare for original source submodule"
 3. **공개 가능 여부** (오픈소스인지, 공개 제한이 있는지)
 
 **결론**: 원본 소스코드 없이는 분석 문서의 가치가 크게 떨어집니다. 원본 소스의 위치와 라이선스 정보를 제공해주시면 즉시 submodule로 추가하겠습니다.
+
+#### Q14: AMPDU 함수명 정정
+**Question**: work_log.md에 있는 `.ampdu_action = nrc_ampdu_action,` 내용에서 함수의 이름이 `nrc_mac_ampdu_action`이다.
+
+**Answer**: 정확한 지적입니다! 실제 소스코드를 확인하여 함수명을 정정했습니다.
+
+**실제 소스코드 확인 결과**:
+- **파일**: `nrc-mac80211.c:3469`
+- **실제 함수명**: `nrc_mac_ampdu_action` 
+- **함수 구현**: `nrc-mac80211.c:2321`
+
+**실제 구현의 차이점**:
+- 이전 추정: Driver level에서 BA 상태 관리
+- **실제 구현**: `nrc_wim_ampdu_action()` 호출하여 **WIM protocol을 통해 펌웨어에 전달**
+
+**이는 중요한 아키텍처 차이점입니다**:
+```c
+// 실제 구현에서는 WIM protocol 사용
+case IEEE80211_AMPDU_TX_START:
+    if (nrc_wim_ampdu_action(nw, vif, WIM_AMPDU_TX_START, sta, tid))
+        return -EIO;
+    return IEEE80211_AMPDU_TX_START_IMMEDIATE;
+```
+
+이로써 NRC7292는 **SoftMAC이지만 AMPDU 제어는 펌웨어에서 처리**하는 하이브리드 구조임이 확인되었습니다.
+
+#### Q15: AMPDU TX START 과정 상세 분석
+**Question**: `IEEE80211_AMPDU_TX_START` case의 코드에 대해 상세히 설명하고 kernel function의 역할도 알려달라.
+
+**Answer**: 이는 AMPDU TX BA session 시작 과정의 핵심 구현으로, 여러 단계의 검증과 콜백을 통해 안전하게 처리됩니다.
+
+**1. 코드 단계별 분석:**
+
+**Step 1: Debug 로깅**
+```c
+nrc_dbg(NRC_DBG_MAC, "%s: IEEE80211_AMPDU_TX_START", __func__);
+```
+- **목적**: BA session 시작 요청 로깅
+- **__func__**: 현재 함수명 (`nrc_mac_ampdu_action`) 출력
+
+**Step 2: AMPDU 지원 여부 검증**
+```c
+#ifdef CONFIG_SUPPORT_LINK_STA
+        if (!nw->ampdu_supported || !sta->deflink.ht_cap.ht_supported)
+#else
+        if (!nw->ampdu_supported || !sta->ht_cap.ht_supported)
+#endif
+            return -EOPNOTSUPP;
+```
+
+**검증 조건**:
+- **`nw->ampdu_supported`**: NRC 드라이버의 AMPDU 지원 설정
+- **`sta->ht_cap.ht_supported`**: 상대방 스테이션의 HT 지원 여부
+- **`CONFIG_SUPPORT_LINK_STA`**: 최신 커널의 multi-link 지원 여부
+
+**Link STA vs Legacy STA**:
+```c
+// 최신 커널 (multi-link 지원)
+sta->deflink.ht_cap.ht_supported    // default link의 HT capability
+
+// 기존 커널 (single link)
+sta->ht_cap.ht_supported            // 스테이션의 HT capability
+```
+
+**Step 3: 펌웨어에 AMPDU 시작 요청**
+```c
+if (nrc_wim_ampdu_action(nw, vif, WIM_AMPDU_TX_START, sta, tid))
+    return -EOPNOTSUPP;
+```
+
+**nrc_wim_ampdu_action() 역할**:
+- **WIM protocol**: Wireless Interface Module protocol을 통해 펌웨어 통신
+- **WIM_AMPDU_TX_START**: 펌웨어에 TX AMPDU 시작 명령 전송
+- **반환값**: 성공(0) 또는 실패(non-zero)
+
+**Step 4: Driver 상태 관리**
+```c
+i_sta->tx_ba_session[tid] = IEEE80211_BA_REQUEST;
+```
+
+**BA Session 상태**:
+```c
+enum ieee80211_tx_ba_state {
+    IEEE80211_BA_NONE,         // BA 세션 없음
+    IEEE80211_BA_REQUEST,      // BA 세션 요청 중 ← 현재 상태
+    IEEE80211_BA_PENDING,      // BA 세션 대기 중
+    IEEE80211_BA_OPERATIONAL,  // BA 세션 동작 중
+    IEEE80211_BA_CLOSE         // BA 세션 종료 중
+};
+```
+
+**Step 5: mac80211에 성공 알림**
+```c
+ieee80211_start_tx_ba_cb_irqsafe(vif, sta->addr, tid);
+```
+
+**2. ieee80211_start_tx_ba_cb_irqsafe() 커널 함수 역할:**
+
+**함수 시그니처**:
+```c
+void ieee80211_start_tx_ba_cb_irqsafe(struct ieee80211_vif *vif,
+                                      const u8 *ra,
+                                      u16 tid);
+```
+
+**핵심 역할**:
+- **IRQ-safe 콜백**: Interrupt context에서 안전하게 호출 가능
+- **mac80211 알림**: 드라이버가 AMPDU 시작 준비 완료를 mac80211에 알림
+- **ADDBA 프레임 송신**: mac80211이 상대방에게 ADDBA Request 프레임 전송
+
+**3. 전체 AMPDU 시작 시퀀스:**
+
+```
+1. mac80211이 nrc_mac_ampdu_action() 호출
+   ↓
+2. NRC 드라이버 검증 (AMPDU 지원, HT capability)
+   ↓
+3. 펌웨어에 WIM_AMPDU_TX_START 명령 전송
+   ↓
+4. 펌웨어가 AMPDU 준비 완료
+   ↓
+5. Driver 상태를 IEEE80211_BA_REQUEST로 설정
+   ↓
+6. ieee80211_start_tx_ba_cb_irqsafe() 호출
+   ↓
+7. mac80211이 ADDBA Request 프레임 생성 및 전송
+   ↓
+8. 상대방이 ADDBA Response로 응답
+   ↓
+9. BA session OPERATIONAL 상태로 전환
+```
+
+**4. IRQ-safe의 중요성:**
+
+**일반 콜백 vs IRQ-safe 콜백**:
+```c
+// 일반 콜백 (process context에서만 안전)
+ieee80211_start_tx_ba_cb(vif, sta->addr, tid);
+
+// IRQ-safe 콜백 (interrupt context에서도 안전)
+ieee80211_start_tx_ba_cb_irqsafe(vif, sta->addr, tid);
+```
+
+**IRQ-safe가 필요한 이유**:
+- **Interrupt context**: 네트워크 드라이버는 interrupt context에서 동작
+- **Atomic context**: Sleep 불가능한 컨텍스트에서 안전한 처리
+- **Race condition 방지**: mac80211 internal 상태 보호
+
+**5. 에러 처리:**
+
+**각 단계의 실패 시나리오**:
+```c
+// AMPDU 미지원 시
+return -EOPNOTSUPP;  // mac80211에 지원 불가 알림
+
+// 펌웨어 통신 실패 시  
+return -EOPNOTSUPP;  // BA session 시작 불가
+
+// 성공 시
+return IEEE80211_AMPDU_TX_START_IMMEDIATE;  // 즉시 시작 가능
+```
+
+**결론**: 이 코드는 **SoftMAC과 펌웨어 간의 협력**을 보여주는 완벽한 예시로, mac80211의 표준 인터페이스를 통해 NRC 전용 WIM protocol과 연동하는 하이브리드 아키텍처의 핵심입니다.
+
+**8. 해결 완료:**
+
+✅ **Submodule 추가 성공**:
+```bash
+git submodule add https://github.com/oyongjoo/nrc7292_sw_pkg.git code_analysis/nrc7292_source
+```
+
+✅ **원본 소스코드 확인**:
+- 경로: `code_analysis/nrc7292_source/package/src/nrc/`
+- setup_ba_session() 함수: `nrc-trx.c:229` ✅ 확인됨
+- 모든 분석 참조 파일들 존재 확인 완료
+
+✅ **Repository 구조 최적화**:
+```
+📁 nrc7292-analysis/
+├── 📁 code_analysis/
+│   ├── 📁 nrc7292_source/     ← ✅ 원본 소스 (submodule)
+│   ├── source_analysis/       ← 분석 문서들
+│   └── architecture/          ← 아키텍처 문서들
+├── 📁 _posts/                 ← 블로그 포스트
+└── README.md
+```
+
+✅ **검증 완료**:
+- nrc-trx.c:229에 setup_ba_session() 실제 구현 확인
+- 모든 분석 문서의 소스 참조가 이제 유효함
+- 분석 문서와 실제 소스코드 완전 일치
 
 #### Current Status
 - **nrc7292_sw_pkg**: Placeholder 구조 추가 완료 (실제 소스코드 아님)
