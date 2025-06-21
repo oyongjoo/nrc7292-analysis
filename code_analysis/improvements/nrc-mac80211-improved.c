@@ -176,6 +176,7 @@ static void process_txqs_by_ac_priority(struct nrc *nw, int target_ac, int *rema
             break; /* No more credits available */
         }
 
+        /* Allocate fair share of credits to this TXQ */
         int allocated_credit = min(credit_per_txq, *remaining_credit);
         int ret = nrc_push_txq_improved(nw, ntxq, allocated_credit);
 
@@ -187,10 +188,12 @@ static void process_txqs_by_ac_priority(struct nrc *nw, int target_ac, int *rema
             list_move_tail(&ntxq->list, &nw->txq);
         }
 
-        /* Estimate used credits (simplified) */
-        int estimated_used = min(allocated_credit, 
-                               count_active_txqs_by_ac(nw, target_ac) > 0 ? allocated_credit : 0);
-        *remaining_credit -= estimated_used;
+        /* 
+         * Deduct allocated credits from remaining pool
+         * Note: We deduct the allocated amount regardless of actual usage
+         * to ensure fair distribution among TXQs
+         */
+        *remaining_credit -= allocated_credit;
     }
 }
 
