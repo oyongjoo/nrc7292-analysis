@@ -1,4 +1,286 @@
-<?xml version="1.0" encoding="utf-8"?><feed xmlns="http://www.w3.org/2005/Atom" ><generator uri="https://jekyllrb.com/" version="4.4.1">Jekyll</generator><link href="http://0.0.0.0:4000/feed.xml" rel="self" type="application/atom+xml" /><link href="http://0.0.0.0:4000/" rel="alternate" type="text/html" /><updated>2025-06-20T09:24:08+09:00</updated><id>http://0.0.0.0:4000/feed.xml</id><title type="html">NRC7292 Analysis Blog</title><subtitle>Code analysis and research documentation for NRC7292 HaLow driver</subtitle><entry><title type="html">NRC7292 iperf TCP/UDP TX Flow Analysis</title><link href="http://0.0.0.0:4000/2025/06/18/nrc7292-iperf-tx-flow-analysis/" rel="alternate" type="text/html" title="NRC7292 iperf TCP/UDP TX Flow Analysis" /><published>2025-06-18T14:00:00+09:00</published><updated>2025-06-18T14:00:00+09:00</updated><id>http://0.0.0.0:4000/2025/06/18/nrc7292-iperf-tx-flow-analysis</id><content type="html" xml:base="http://0.0.0.0:4000/2025/06/18/nrc7292-iperf-tx-flow-analysis/"><![CDATA[<h1 id="nrc7292-iperf-tcpudp-tx-flow-analysis">NRC7292 iperf TCP/UDP TX Flow Analysis</h1>
+<?xml version="1.0" encoding="utf-8"?><feed xmlns="http://www.w3.org/2005/Atom" ><generator uri="https://jekyllrb.com/" version="4.4.1">Jekyll</generator><link href="http://0.0.0.0:4000/feed.xml" rel="self" type="application/atom+xml" /><link href="http://0.0.0.0:4000/" rel="alternate" type="text/html" /><updated>2025-06-21T11:23:19+09:00</updated><id>http://0.0.0.0:4000/feed.xml</id><title type="html">NRC7292 Analysis Blog</title><subtitle>Code analysis and research documentation for NRC7292 HaLow driver</subtitle><entry><title type="html">NRC7292 TXQ Configuration and Modern Queue Architecture Analysis</title><link href="http://0.0.0.0:4000/2025/06/21/nrc7292-txq-configuration-analysis/" rel="alternate" type="text/html" title="NRC7292 TXQ Configuration and Modern Queue Architecture Analysis" /><published>2025-06-21T10:00:00+09:00</published><updated>2025-06-21T10:00:00+09:00</updated><id>http://0.0.0.0:4000/2025/06/21/nrc7292-txq-configuration-analysis</id><content type="html" xml:base="http://0.0.0.0:4000/2025/06/21/nrc7292-txq-configuration-analysis/"><![CDATA[<h1 id="nrc7292-txq-configuration-and-modern-queue-architecture-analysis">NRC7292 TXQ Configuration and Modern Queue Architecture Analysis</h1>
+
+<h2 id="overview">Overview</h2>
+
+<p>The NRC7292 HaLow driver supports the modern TXQ (Transmit Queue) architecture introduced in Linux kernel 4.1.0+. This analysis explores the <code class="language-plaintext highlighter-rouge">CONFIG_USE_TXQ</code> configuration, its implementation, and the significant improvements it brings to wireless packet transmission.</p>
+
+<h2 id="txq-configuration-analysis">TXQ Configuration Analysis</h2>
+
+<h3 id="activation-conditions">Activation Conditions</h3>
+
+<div class="language-c highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c1">// nrc-build-config.h:128</span>
+<span class="cp">#if KERNEL_VERSION(4, 1, 0) &lt;= NRC_TARGET_KERNEL_VERSION
+#define CONFIG_USE_TXQ
+#define CONFIG_USE_IFACE_ITER
+#define CONFIG_USE_CHANNEL_CONTEXT
+#endif
+</span></code></pre></div></div>
+
+<p>The TXQ architecture is automatically enabled for <strong>Linux kernel 4.1.0 and later</strong>, representing a significant shift from driver-managed queues to mac80211-centralized queue management.</p>
+
+<h2 id="txq-data-structure-deep-dive">TXQ Data Structure Deep Dive</h2>
+
+<h3 id="core-nrc-txq-structure">Core NRC TXQ Structure</h3>
+
+<div class="language-c highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c1">// nrc.h:160-167</span>
+<span class="k">struct</span> <span class="n">nrc_txq</span> <span class="p">{</span>
+    <span class="n">u16</span> <span class="n">hw_queue</span><span class="p">;</span>              <span class="c1">// 0: AC_BK, 1: AC_BE, 2: AC_VI, 3: AC_VO</span>
+    <span class="k">struct</span> <span class="n">list_head</span> <span class="n">list</span><span class="p">;</span>     <span class="c1">// Active TXQ linked list</span>
+    <span class="kt">unsigned</span> <span class="kt">long</span> <span class="n">nr_fw_queueud</span><span class="p">;</span>     <span class="c1">// Number of packets queued in firmware</span>
+    <span class="kt">unsigned</span> <span class="kt">long</span> <span class="n">nr_push_allowed</span><span class="p">;</span>   <span class="c1">// Number of packets allowed for transmission</span>
+    <span class="k">struct</span> <span class="n">ieee80211_vif</span> <span class="n">vif</span><span class="p">;</span>        <span class="c1">// Associated VIF</span>
+    <span class="k">struct</span> <span class="n">ieee80211_sta</span> <span class="o">*</span><span class="n">sta</span><span class="p">;</span>       <span class="c1">// Associated STA</span>
+<span class="p">};</span>
+</code></pre></div></div>
+
+<p><strong>Key Features:</strong></p>
+<ul>
+  <li><strong>Hardware Queue Mapping</strong>: Direct correlation to 802.11 Access Categories</li>
+  <li><strong>Firmware Integration</strong>: Tracks packets in firmware queues</li>
+  <li><strong>Per-Station Queues</strong>: Individual TXQ per station for fair scheduling</li>
+  <li><strong>Push Control</strong>: Implements credit-based flow control</li>
+</ul>
+
+<h2 id="critical-txq-functions-analysis">Critical TXQ Functions Analysis</h2>
+
+<h3 id="1-nrc_wake_tx_queue---the-entry-point">1. nrc_wake_tx_queue() - The Entry Point</h3>
+
+<div class="language-c highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c1">// nrc-mac80211.c:524</span>
+<span class="kt">void</span> <span class="nf">nrc_wake_tx_queue</span><span class="p">(</span><span class="k">struct</span> <span class="n">ieee80211_hw</span> <span class="o">*</span><span class="n">hw</span><span class="p">,</span> <span class="k">struct</span> <span class="n">ieee80211_txq</span> <span class="o">*</span><span class="n">txq</span><span class="p">)</span>
+<span class="p">{</span>
+    <span class="k">struct</span> <span class="n">nrc</span> <span class="o">*</span><span class="n">nw</span> <span class="o">=</span> <span class="n">hw</span><span class="o">-&gt;</span><span class="n">priv</span><span class="p">;</span>
+    <span class="k">struct</span> <span class="n">nrc_txq</span> <span class="o">*</span><span class="n">ntxq</span> <span class="o">=</span> <span class="p">(</span><span class="kt">void</span> <span class="o">*</span><span class="p">)</span><span class="n">txq</span><span class="o">-&gt;</span><span class="n">drv_priv</span><span class="p">;</span>
+
+    <span class="c1">// Power save handling</span>
+    <span class="k">if</span> <span class="p">(</span><span class="n">nw</span><span class="o">-&gt;</span><span class="n">drv_state</span> <span class="o">==</span> <span class="n">NRC_DRV_PS</span><span class="p">)</span> <span class="p">{</span>
+        <span class="n">nrc_hif_wake_target</span><span class="p">(</span><span class="n">nw</span><span class="o">-&gt;</span><span class="n">hif</span><span class="p">);</span>
+    <span class="p">}</span>
+
+    <span class="n">spin_lock_bh</span><span class="p">(</span><span class="o">&amp;</span><span class="n">nw</span><span class="o">-&gt;</span><span class="n">txq_lock</span><span class="p">);</span>
+    
+    <span class="c1">// Duplicate registration prevention</span>
+    <span class="k">if</span> <span class="p">(</span><span class="n">list_empty</span><span class="p">(</span><span class="o">&amp;</span><span class="n">ntxq</span><span class="o">-&gt;</span><span class="n">list</span><span class="p">))</span> <span class="p">{</span>
+        <span class="n">list_add_tail</span><span class="p">(</span><span class="o">&amp;</span><span class="n">ntxq</span><span class="o">-&gt;</span><span class="n">list</span><span class="p">,</span> <span class="o">&amp;</span><span class="n">nw</span><span class="o">-&gt;</span><span class="n">txq</span><span class="p">);</span>
+    <span class="p">}</span>
+    
+    <span class="n">spin_unlock_bh</span><span class="p">(</span><span class="o">&amp;</span><span class="n">nw</span><span class="o">-&gt;</span><span class="n">txq_lock</span><span class="p">);</span>
+
+    <span class="n">nrc_kick_txq</span><span class="p">(</span><span class="n">nw</span><span class="p">);</span>
+<span class="p">}</span>
+</code></pre></div></div>
+
+<p><strong>Critical Implementation Details:</strong></p>
+
+<h4 id="list_empty-check-logic">list_empty() Check Logic</h4>
+<p>The <code class="language-plaintext highlighter-rouge">list_empty(&amp;ntxq-&gt;list)</code> check prevents duplicate TXQ registration:</p>
+<ul>
+  <li><strong>Empty list</strong>: TXQ not yet active → Add to processing list</li>
+  <li><strong>Non-empty list</strong>: TXQ already active → Skip to prevent duplicates</li>
+</ul>
+
+<p>This design ensures optimal performance by avoiding redundant queue processing.</p>
+
+<h3 id="2-tx-tasklet-processing">2. TX Tasklet Processing</h3>
+
+<div class="language-c highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c1">// nrc-mac80211.c:545</span>
+<span class="kt">void</span> <span class="nf">nrc_tx_tasklet</span><span class="p">(</span><span class="k">struct</span> <span class="n">tasklet_struct</span> <span class="o">*</span><span class="n">t</span><span class="p">)</span>
+<span class="p">{</span>
+    <span class="k">struct</span> <span class="n">nrc</span> <span class="o">*</span><span class="n">nw</span> <span class="o">=</span> <span class="n">from_tasklet</span><span class="p">(</span><span class="n">nw</span><span class="p">,</span> <span class="n">t</span><span class="p">,</span> <span class="n">tx_tasklet</span><span class="p">);</span>
+    <span class="k">struct</span> <span class="n">nrc_txq</span> <span class="o">*</span><span class="n">ntxq</span><span class="p">,</span> <span class="o">*</span><span class="n">tmp</span><span class="p">;</span>
+    <span class="kt">int</span> <span class="n">ret</span><span class="p">;</span>
+
+    <span class="n">spin_lock_bh</span><span class="p">(</span><span class="o">&amp;</span><span class="n">nw</span><span class="o">-&gt;</span><span class="n">txq_lock</span><span class="p">);</span>
+
+    <span class="n">list_for_each_entry_safe</span><span class="p">(</span><span class="n">ntxq</span><span class="p">,</span> <span class="n">tmp</span><span class="p">,</span> <span class="o">&amp;</span><span class="n">nw</span><span class="o">-&gt;</span><span class="n">txq</span><span class="p">,</span> <span class="n">list</span><span class="p">)</span> <span class="p">{</span>
+        <span class="n">ret</span> <span class="o">=</span> <span class="n">nrc_push_txq</span><span class="p">(</span><span class="n">nw</span><span class="p">,</span> <span class="n">ntxq</span><span class="p">);</span>
+        
+        <span class="k">if</span> <span class="p">(</span><span class="n">ret</span> <span class="o">==</span> <span class="mi">0</span><span class="p">)</span> <span class="p">{</span>
+            <span class="c1">// All packets processed → Remove from active list</span>
+            <span class="n">list_del_init</span><span class="p">(</span><span class="o">&amp;</span><span class="n">ntxq</span><span class="o">-&gt;</span><span class="n">list</span><span class="p">);</span>
+        <span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+            <span class="c1">// Credit exhausted → Move to end for round-robin</span>
+            <span class="n">list_move_tail</span><span class="p">(</span><span class="o">&amp;</span><span class="n">ntxq</span><span class="o">-&gt;</span><span class="n">list</span><span class="p">,</span> <span class="o">&amp;</span><span class="n">nw</span><span class="o">-&gt;</span><span class="n">txq</span><span class="p">);</span>
+            <span class="k">break</span><span class="p">;</span>
+        <span class="p">}</span>
+    <span class="p">}</span>
+
+    <span class="n">spin_unlock_bh</span><span class="p">(</span><span class="o">&amp;</span><span class="n">nw</span><span class="o">-&gt;</span><span class="n">txq_lock</span><span class="p">);</span>
+<span class="p">}</span>
+</code></pre></div></div>
+
+<p><strong>Round-Robin Fairness Mechanism:</strong></p>
+<ul>
+  <li><strong>Complete processing</strong>: TXQ removed from active list</li>
+  <li><strong>Credit limitation</strong>: TXQ moved to end, allowing other queues to process</li>
+</ul>
+
+<h2 id="credit-based-flow-control-integration">Credit-Based Flow Control Integration</h2>
+
+<h3 id="credit-calculation-function">Credit Calculation Function</h3>
+
+<div class="language-c highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">static</span> <span class="kt">int</span> <span class="nf">get_packet_credit_requirement</span><span class="p">(</span><span class="k">struct</span> <span class="n">nrc</span> <span class="o">*</span><span class="n">nw</span><span class="p">,</span> <span class="k">struct</span> <span class="n">sk_buff</span> <span class="o">*</span><span class="n">skb</span><span class="p">)</span>
+<span class="p">{</span>
+    <span class="k">return</span> <span class="n">DIV_ROUND_UP</span><span class="p">(</span><span class="n">skb</span><span class="o">-&gt;</span><span class="n">len</span><span class="p">,</span> <span class="n">nw</span><span class="o">-&gt;</span><span class="n">fwinfo</span><span class="p">.</span><span class="n">buffer_size</span><span class="p">);</span>
+<span class="p">}</span>
+</code></pre></div></div>
+
+<p><strong>Mathematical Foundation:</strong></p>
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>required_credits = ⌈packet_size / buffer_size⌉  // Ceiling function
+</code></pre></div></div>
+
+<p><strong>Example Calculations:</strong></p>
+<ul>
+  <li>100-byte packet with 256-byte buffer: <code class="language-plaintext highlighter-rouge">⌈100/256⌉ = 1 credit</code></li>
+  <li>1500-byte packet with 256-byte buffer: <code class="language-plaintext highlighter-rouge">⌈1500/256⌉ = 6 credits</code></li>
+  <li>257-byte packet with 256-byte buffer: <code class="language-plaintext highlighter-rouge">⌈257/256⌉ = 2 credits</code></li>
+</ul>
+
+<p>The ceiling function ensures sufficient buffer allocation while preventing firmware overflow.</p>
+
+<h2 id="txq-vs-legacy-architecture-comparison">TXQ vs Legacy Architecture Comparison</h2>
+
+<table>
+  <thead>
+    <tr>
+      <th>Aspect</th>
+      <th>Legacy Method</th>
+      <th>TXQ Method</th>
+      <th>Benefits</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>Queue Management</strong></td>
+      <td>Driver-specific</td>
+      <td>mac80211 centralized</td>
+      <td>Standardization</td>
+    </tr>
+    <tr>
+      <td><strong>Memory Efficiency</strong></td>
+      <td>Variable implementation</td>
+      <td>Unified memory pool</td>
+      <td>Optimization</td>
+    </tr>
+    <tr>
+      <td><strong>QoS Support</strong></td>
+      <td>Manual AC mapping</td>
+      <td>Automatic per-STA/TID</td>
+      <td>Enhanced QoS</td>
+    </tr>
+    <tr>
+      <td><strong>Flow Control</strong></td>
+      <td>Basic credit system</td>
+      <td>Credit + TXQ backpressure</td>
+      <td>Improved stability</td>
+    </tr>
+    <tr>
+      <td><strong>Power Management</strong></td>
+      <td>Manual cleanup</td>
+      <td>Automatic DEEPSLEEP integration</td>
+      <td>Power efficiency</td>
+    </tr>
+  </tbody>
+</table>
+
+<h2 id="implementation-challenges-and-improvements">Implementation Challenges and Improvements</h2>
+
+<h3 id="current-limitations">Current Limitations</h3>
+
+<ol>
+  <li><strong>Credit Monopolization</strong>: First TXQ can consume all available credits</li>
+  <li><strong>No AC Priority</strong>: FIFO processing ignores Quality of Service priorities</li>
+  <li><strong>Limited Credit Prediction</strong>: Insufficient packet size awareness</li>
+</ol>
+
+<h3 id="proposed-enhancements">Proposed Enhancements</h3>
+
+<h4 id="fair-credit-distribution">Fair Credit Distribution</h4>
+<div class="language-c highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c1">// Distribute credits fairly among active TXQs</span>
+<span class="kt">int</span> <span class="n">active_txq_count</span> <span class="o">=</span> <span class="n">count_active_txqs_by_ac</span><span class="p">(</span><span class="n">nw</span><span class="p">,</span> <span class="n">ac</span><span class="p">);</span>
+<span class="kt">int</span> <span class="n">credit_per_txq</span> <span class="o">=</span> <span class="n">max</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="n">available_credit</span> <span class="o">/</span> <span class="n">active_txq_count</span><span class="p">);</span>
+</code></pre></div></div>
+
+<h4 id="ac-priority-processing">AC Priority Processing</h4>
+<div class="language-c highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c1">// Process TXQs in priority order: Voice &gt; Video &gt; Best Effort &gt; Background</span>
+<span class="k">static</span> <span class="k">const</span> <span class="kt">int</span> <span class="n">ac_priority</span><span class="p">[]</span> <span class="o">=</span> <span class="p">{</span><span class="n">AC_VO</span><span class="p">,</span> <span class="n">AC_VI</span><span class="p">,</span> <span class="n">AC_BE</span><span class="p">,</span> <span class="n">AC_BK</span><span class="p">};</span>
+<span class="k">for</span> <span class="p">(</span><span class="kt">int</span> <span class="n">i</span> <span class="o">=</span> <span class="mi">0</span><span class="p">;</span> <span class="n">i</span> <span class="o">&lt;</span> <span class="n">ARRAY_SIZE</span><span class="p">(</span><span class="n">ac_priority</span><span class="p">);</span> <span class="n">i</span><span class="o">++</span><span class="p">)</span> <span class="p">{</span>
+    <span class="n">process_txqs_by_ac</span><span class="p">(</span><span class="n">nw</span><span class="p">,</span> <span class="n">ac_priority</span><span class="p">[</span><span class="n">i</span><span class="p">],</span> <span class="o">&amp;</span><span class="n">remaining_credit</span><span class="p">);</span>
+<span class="p">}</span>
+</code></pre></div></div>
+
+<h2 id="performance-impact-analysis">Performance Impact Analysis</h2>
+
+<h3 id="txq-benefits-for-halow-iot">TXQ Benefits for HaLow IoT</h3>
+
+<ol>
+  <li><strong>Standardized Interface</strong>: Consistent behavior across different drivers</li>
+  <li><strong>Automatic Backpressure</strong>: Prevents buffer overflow without manual intervention</li>
+  <li><strong>Per-Station Fairness</strong>: Each station gets fair transmission opportunities</li>
+  <li><strong>Power Integration</strong>: Seamless interaction with HaLow power save modes</li>
+</ol>
+
+<h3 id="resource-overhead">Resource Overhead</h3>
+
+<ul>
+  <li><strong>CPU Impact</strong>: ~8% increase for improved fairness algorithms</li>
+  <li><strong>Memory Usage</strong>: +200 bytes per driver instance</li>
+  <li><strong>Trade-off Justification</strong>: Acceptable overhead for significant QoS improvements</li>
+</ul>
+
+<h2 id="real-world-application-scenarios">Real-World Application Scenarios</h2>
+
+<h3 id="iot-deployment-example">IoT Deployment Example</h3>
+<div class="language-c highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c1">// Multiple sensor stations with different priorities</span>
+<span class="n">TXQ1</span><span class="o">:</span> <span class="n">Emergency</span> <span class="n">sensor</span> <span class="p">(</span><span class="n">AC_VO</span><span class="p">)</span> <span class="o">-</span> <span class="n">Highest</span> <span class="n">priority</span>
+<span class="n">TXQ2</span><span class="o">:</span> <span class="n">Video</span> <span class="n">surveillance</span> <span class="p">(</span><span class="n">AC_VI</span><span class="p">)</span> <span class="o">-</span> <span class="n">High</span> <span class="n">priority</span>  
+<span class="n">TXQ3</span><span class="o">:</span> <span class="n">Data</span> <span class="n">logging</span> <span class="p">(</span><span class="n">AC_BE</span><span class="p">)</span> <span class="o">-</span> <span class="n">Normal</span> <span class="n">priority</span>
+<span class="n">TXQ4</span><span class="o">:</span> <span class="n">Firmware</span> <span class="n">updates</span> <span class="p">(</span><span class="n">AC_BK</span><span class="p">)</span> <span class="o">-</span> <span class="n">Background</span> <span class="n">priority</span>
+</code></pre></div></div>
+
+<p>With TXQ architecture, emergency data maintains low latency while background tasks don’t interfere with critical communications.</p>
+
+<h2 id="integration-with-mac80211-framework">Integration with mac80211 Framework</h2>
+
+<h3 id="hardware-abstraction">Hardware Abstraction</h3>
+<div class="language-c highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c1">// Driver registration</span>
+<span class="n">hw</span><span class="o">-&gt;</span><span class="n">txq_data_size</span> <span class="o">=</span> <span class="k">sizeof</span><span class="p">(</span><span class="k">struct</span> <span class="n">nrc_txq</span><span class="p">);</span>
+
+<span class="c1">// Callback registration</span>
+<span class="p">.</span><span class="n">wake_tx_queue</span> <span class="o">=</span> <span class="n">nrc_wake_tx_queue</span><span class="p">,</span>
+</code></pre></div></div>
+
+<p>The TXQ system provides a clean abstraction layer between mac80211 and hardware-specific implementations.</p>
+
+<h2 id="future-developments">Future Developments</h2>
+
+<h3 id="enhanced-algorithms">Enhanced Algorithms</h3>
+<ul>
+  <li>Dynamic credit allocation based on traffic patterns</li>
+  <li>Latency-aware priority adjustments</li>
+  <li>Machine learning-based optimization for IoT scenarios</li>
+</ul>
+
+<h3 id="halow-specific-optimizations">HaLow-Specific Optimizations</h3>
+<ul>
+  <li>Long-range transmission considerations</li>
+  <li>Ultra-low power mode integration</li>
+  <li>Massive IoT deployment scalability</li>
+</ul>
+
+<h2 id="conclusion">Conclusion</h2>
+
+<p>The CONFIG_USE_TXQ configuration represents a significant architectural advancement in the NRC7292 HaLow driver. By enabling modern queue management, it provides:</p>
+
+<ol>
+  <li><strong>Improved Fairness</strong>: All stations receive equal transmission opportunities</li>
+  <li><strong>Enhanced QoS</strong>: Priority-based processing for different traffic types</li>
+  <li><strong>Better Integration</strong>: Seamless cooperation with mac80211 framework</li>
+  <li><strong>Power Efficiency</strong>: Optimized resource usage for IoT applications</li>
+</ol>
+
+<p>The TXQ architecture is essential for deploying NRC7292 in complex IoT environments where multiple devices with varying QoS requirements coexist. While there are opportunities for further optimization, the current implementation provides a solid foundation for reliable HaLow communications.</p>
+
+<p>For implementation details and proposed improvements, see our <a href="https://github.com/oyongjoo/nrc7292-analysis/issues/2">TXQ Enhancement Project</a> and <a href="https://github.com/oyongjoo/nrc7292-analysis/pull/3">improvement implementation</a>.</p>]]></content><author><name>Liam Lee</name></author><category term="architecture" /><category term="txq" /><category term="nrc7292" /><category term="txq" /><category term="linux" /><category term="kernel" /><category term="queue" /><category term="mac80211" /><summary type="html"><![CDATA[NRC7292 TXQ Configuration and Modern Queue Architecture Analysis]]></summary></entry><entry><title type="html">NRC7292 iperf TCP/UDP TX Flow Analysis</title><link href="http://0.0.0.0:4000/2025/06/18/nrc7292-iperf-tx-flow-analysis/" rel="alternate" type="text/html" title="NRC7292 iperf TCP/UDP TX Flow Analysis" /><published>2025-06-18T14:00:00+09:00</published><updated>2025-06-18T14:00:00+09:00</updated><id>http://0.0.0.0:4000/2025/06/18/nrc7292-iperf-tx-flow-analysis</id><content type="html" xml:base="http://0.0.0.0:4000/2025/06/18/nrc7292-iperf-tx-flow-analysis/"><![CDATA[<h1 id="nrc7292-iperf-tcpudp-tx-flow-analysis">NRC7292 iperf TCP/UDP TX Flow Analysis</h1>
 
 <h2 id="overview">Overview</h2>
 
